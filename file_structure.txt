@@ -1,0 +1,73 @@
+# Chess AI Project File Structure Recommendation
+
+Based on analyzing your script, I recommend breaking it down into the following files to improve organization and maintainability:
+
+## 1. constants.py
+- All constants: `PIECE_VALUES`
+- UI color constants (`LIGHT_SQUARE_COLOR`, `DARK_SQUARE_COLOR`, etc.)
+- `MAX_CACHE_SIZE`
+
+## 2. board_utils.py
+- `board_to_tensor()`, `boards_to_tensor_batch()`
+- `get_valid_moves_cached()`, `get_valid_moves()`
+- `get_move_uci()`
+- `get_legal_moves_from_square()`, `get_secondary_moves()`
+- `square_name_to_square()`
+- `print_board()`
+- Global caching variables: `EVAL_CACHE` and `CACHE_LOCK`
+
+## 3. evaluation.py
+- `fast_evaluate_position()`
+- `categorize_moves()`, `select_weighted_moves()`
+- `find_threatened_squares()`, `find_guarded_squares()`
+- `calculate_attack_range()`, `calculate_movement_range()`
+- `format_score()`
+
+## 4. mcts.py
+- `RussianDollMCTS` class
+- `ParallelRussianDollMCTS` class
+
+## 5. neural_network.py
+- `ChessQNetwork` class
+- `DQNAgent` class
+
+## 6. chess_ai.py
+- Core `OptimizedChessAI` class with all its methods:
+  - `reset_board()`, `set_board_from_fen()`, `make_move()`
+  - `get_best_move()`
+  - `self_play_game()`, `train()`
+  - `save_model()`, `load_model()`
+  - `evaluate_elo_rating()`
+  - All plotting and analysis methods
+
+## 7. game_play.py
+- `play_game()`, `get_human_move()`
+- `visual_play_game()`, `visual_play_game_with_features()`
+- `enhanced_human_move()`
+- Game persistence: `save_game_to_pgn()`, `load_game_from_pgn()`, `list_saved_games()`
+
+## 8. ui.py
+- `create_visual_chess_board()`
+- `ClickableChessBoard` class
+- `NonClickableChessBoard` class
+- All UI-related helper functions
+
+## 9. menu.py
+- `display_full_menu()`
+- `handle_menu_selections()`
+- `main()`
+
+## 10. main.py
+- Import everything and call `main()` function
+- Set up common imports and random seeds
+
+This organization groups related functionality together, making the codebase more manageable and easier to maintain. You'll need to adjust imports between these files to account for dependencies.
+
+When implementing this structure, I recommend:
+1. Create each file with proper imports
+2. Start with constants.py since it has no dependencies
+3. Implement board_utils.py and evaluation.py next
+4. Continue with the other files in dependency order
+5. Test each module individually when possible
+
+Would you like me to help you implement any of these specific files?
