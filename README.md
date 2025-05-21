@@ -1,3 +1,6 @@
+#python 3.10
+python main.py
+
 # chess-deep-q
 Chess based on training a deep q learning model
 
