@@ -3,7 +3,6 @@
 - board_utils.py
 - chessv3.py
 - chess_ai.py
-- codebase.md
 - constants.py
 - evaluation.py
 - file_structure.txt
@@ -14,6 +13,8 @@
 - menu.py
 - neural_network.py
 - README.md
+- terminal_board.py
+- threaded_board.py
 - ui.py
 
 ## File: .gitignore
@@ -1280,20 +1281,6 @@ class OptimizedChessAI:
 
 ```
 
-## File: codebase.md
-
-- Extension: .md
-- Language: markdown
-- Size: 0 bytes
-- Created: 2025-05-19 19:59:34
-- Modified: 2025-05-21 06:07:01
-
-### Code
-
-```markdown
-
-```
-
 ## File: constants.py
 
 - Extension: .py
@@ -2372,9 +2359,9 @@ SOFTWARE.
 
 - Extension: .py
 - Language: python
-- Size: 2213 bytes
+- Size: 2593 bytes
 - Created: 2025-05-19 19:26:10
-- Modified: 2025-05-19 19:26:19
+- Modified: 2025-05-21 06:29:27
 
 ### Code
 
@@ -2385,6 +2372,10 @@ import random
 import chess
 import os
 import sys
+
+# Set matplotlib backend BEFORE any other matplotlib imports
+import matplotlib
+matplotlib.use('TkAgg')  # Force TkAgg backend which is interactive
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -2397,9 +2388,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Import main menu function
 from menu import main as menu_main
 
-if __name__ == "__main__":
+def setup_environment():
+    """Setup the environment for the chess AI"""
     # Check if required packages are installed
-    required_packages = ['numpy', 'torch', 'pygame', 'chess', 'matplotlib']
+    required_packages = ['numpy', 'torch', 'chess', 'matplotlib']
     missing_packages = []
     
     for package in required_packages:
@@ -2431,28 +2423,36 @@ if __name__ == "__main__":
     os.makedirs("saved_games", exist_ok=True)
     os.makedirs("models", exist_ok=True)
     
-    # Check if pygame is properly initialized
+    return device
+
+def main():
+    """Main entry point for the chess AI application"""
     try:
-        import pygame
-        pygame.init()
-        pygame.quit()
-        print("Pygame initialized successfully.")
-    except Exception as e:
-        print(f"Warning: Pygame initialization issue: {e}")
-        print("Visual board features may not work properly.")
-    
-    # Start the program
-    try:
+        # Setup the environment
+        device = setup_environment()
+        
+        # Display welcome message
+        print("\n" + "="*78)
+        print(" "*20 + "Chess AI with Deep Q-Learning and MCTS" + " "*20)
+        print("="*78 + "\n")
+        
+        # Start the application
         menu_main()
+        
     except KeyboardInterrupt:
         print("\nProgram terminated by user.")
     except Exception as e:
-        print(f"\nAn error occurred: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"\nAn unexpected error occurred: {e}")
+        
+        # In debug mode, show the full traceback
+        if os.environ.get('DEBUG', '0') == '1':
+            import traceback
+            traceback.print_exc()
         
     print("\nExiting Chess AI. Goodbye!")
 
+if __name__ == "__main__":
+    main()
 ```
 
 ## File: mcts.py
@@ -2648,18 +2648,22 @@ class ParallelRussianDollMCTS:
 
 - Extension: .py
 - Language: python
-- Size: 23390 bytes
+- Size: 23543 bytes
 - Created: 2025-05-19 19:43:42
-- Modified: 2025-05-20 20:03:59
+- Modified: 2025-05-21 06:57:09
 
 ### Code
 
 ```python
 import chess
-from game_play import play_game, visual_play_game, list_saved_games
-from board_utils import print_board
+import matplotlib.pyplot as plt
+from game_play import play_game, visual_play_game, visual_play_game_with_features, list_saved_games
+from board_utils import print_board, get_move_uci
 from chess_ai import OptimizedChessAI
+from evaluation import fast_evaluate_position, format_score
 from ui import NonClickableChessBoard
+#from threaded_board import ThreadedChessBoard
+from terminal_board import TerminalChessBoard
 
 # Find the display_full_menu function and modify it to prevent repetition
 def display_full_menu(chess_ai):
@@ -2695,8 +2699,8 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         if choice == '1':
             if use_enhanced_features and use_visual_board:
                 # Use the non-clickable board with enhanced features
-                non_clickable_board = NonClickableChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
-                non_clickable_board.start()
+                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+                terminal_board.start()
             elif use_visual_board:
                 visual_play_game(chess_ai, human_color=chess.WHITE)
             else:
@@ -2704,8 +2708,8 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '2':
             if use_enhanced_features and use_visual_board:
                 # Use the non-clickable board with enhanced features
-                non_clickable_board = NonClickableChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
-                non_clickable_board.start()
+                threaded_board = ThreadedChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
+                terminal_board.start()
             elif use_visual_board:
                 visual_play_game(chess_ai, human_color=chess.BLACK)
             else:
@@ -2792,8 +2796,8 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
                     human_color = chess.WHITE if human_color_choice == 'w' else chess.BLACK
                     
                     if use_enhanced_features and use_visual_board:
-                        non_clickable_board = NonClickableChessBoard(chess_ai.board.copy(), chess_ai, human_color=human_color)
-                        non_clickable_board.start()
+                        terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+                        terminal_board.start()
                     elif use_visual_board:
                         visual_play_game(chess_ai, human_color=human_color)
                     else:
@@ -2890,8 +2894,8 @@ def main():
         
         # Start the game
         if use_enhanced_features and use_visual_board:
-            non_clickable_board = NonClickableChessBoard(chess.Board(), chess_ai, human_color=human_color)
-            non_clickable_board.start()
+            terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+            terminal_board.start()
         elif use_visual_board:
             visual_play_game_with_features(chess_ai, human_color=human_color)
         else:
@@ -2947,8 +2951,8 @@ def main():
             human_color = chess.WHITE if color_choice == 'w' else chess.BLACK
             
             if use_enhanced_features and use_visual_board:
-                non_clickable_board = NonClickableChessBoard(chess.Board(), chess_ai, human_color=human_color)
-                non_clickable_board.start()
+                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+                terminal_board.start()
             elif use_visual_board:
                 visual_play_game_with_features(chess_ai, human_color=human_color)
             else:
@@ -3401,13 +3405,16 @@ class DQNAgent:
 
 - Extension: .md
 - Language: markdown
-- Size: 44959 bytes
+- Size: 44991 bytes
 - Created: 2025-05-19 18:55:47
-- Modified: 2025-05-19 19:14:05
+- Modified: 2025-05-21 07:00:27
 
 ### Code
 
 ```markdown
+#python 3.10
+python main.py
+
 # chess-deep-q
 Chess based on training a deep q learning model
 
@@ -4361,13 +4368,567 @@ Future features
 	These requirements aim to significantly improve both the chess understanding and computational efficiency of the system while maintaining a balance between immediate practical improvements and longer-term architectural enhancements.
 ```
 
+## File: terminal_board.py
+
+- Extension: .py
+- Language: python
+- Size: 17956 bytes
+- Created: 2025-05-21 06:54:45
+- Modified: 2025-05-21 06:54:45
+
+### Code
+
+```python
+import chess
+import colorama
+import os
+import time
+from colorama import Fore, Back, Style
+from evaluation import fast_evaluate_position, find_threatened_squares, find_guarded_squares
+from board_utils import get_legal_moves_from_square, get_secondary_moves
+
+# Initialize colorama for cross-platform terminal colors
+colorama.init()
+
+class TerminalChessBoard:
+    def __init__(self, board, ai, human_color=chess.WHITE):
+        self.board = board
+        self.ai = ai
+        self.human_color = human_color
+        self.selected_square = None
+        self.possible_moves = set()
+        self.secondary_moves = set()
+        self.last_move = None
+        self.move_history = []
+        self.board_history = [board.copy()]
+        self.highlighted_hint = None
+        
+    def clear_screen(self):
+        """Clear the terminal screen"""
+        os.system('cls' if os.name == 'nt' else 'clear')
+        
+    def display_board(self):
+        """Display the chess board with colored squares and pieces"""
+        # Get evaluation score
+        evaluation = fast_evaluate_position(self.board)
+        
+        # Find threatened and guarded squares
+        threatened_squares = find_threatened_squares(self.board)
+        guarded_squares = find_guarded_squares(self.board)
+        
+        # Print turn and evaluation at the top
+        turn = "White" if self.board.turn == chess.WHITE else "Black"
+        eval_prefix = "+" if evaluation > 0 else ""
+        
+        print(f"\n{turn} to move | Eval: {eval_prefix}{evaluation:.2f}")
+        print("  " + "-" * 33)
+        
+        # Unicode chess pieces
+        piece_symbols = {
+            'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔',
+            'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+            '.': ' '
+        }
+        
+        # Display board - with white at the bottom
+        for rank in range(7, -1, -1):
+            print(f"{rank+1} |", end=" ")
+            for file in range(8):
+                square = chess.square(file, rank)
+                piece = self.board.piece_at(square)
+                square_symbol = piece_symbols[piece.symbol()] if piece else piece_symbols['.']
+                
+                # Determine background color based on square type and highlights
+                bg_color = Back.LIGHTBLACK_EX if (file + rank) % 2 == 1 else Back.BLACK
+                
+                # Apply highlights
+                if self.selected_square == square:
+                    bg_color = Back.YELLOW
+                elif square in self.possible_moves:
+                    bg_color = Back.GREEN
+                elif square in self.secondary_moves:
+                    bg_color = Back.MAGENTA
+                elif self.last_move and (square == self.last_move.from_square or square == self.last_move.to_square):
+                    bg_color = Back.BLUE
+                elif square in threatened_squares:
+                    bg_color = Back.RED
+                elif square in guarded_squares:
+                    bg_color = Back.CYAN
+                
+                # Determine text color based on piece color
+                if piece:
+                    text_color = Fore.WHITE if piece.color == chess.WHITE else Fore.BLACK
+                else:
+                    text_color = Fore.WHITE
+                
+                # Print the square
+                print(f"{bg_color}{text_color}{square_symbol} {Style.RESET_ALL}", end="")
+            print("|")
+        
+        print("  " + "-" * 33)
+        print("    a  b  c  d  e  f  g  h")
+        
+        # Legend
+        print("\nHighlight Legend:")
+        print(f"{Back.YELLOW}     {Style.RESET_ALL} Selected piece   ", end="")
+        print(f"{Back.GREEN}     {Style.RESET_ALL} Possible moves   ", end="")
+        print(f"{Back.MAGENTA}     {Style.RESET_ALL} Secondary moves")
+        print(f"{Back.BLUE}     {Style.RESET_ALL} Last move        ", end="")
+        print(f"{Back.RED}     {Style.RESET_ALL} Threatened        ", end="")
+        print(f"{Back.CYAN}     {Style.RESET_ALL} Guarded")
+        
+        # Available commands
+        print("\nCommands: 'hint', 'undo', 'save', 'load', 'resign', 'cancel', or enter move (e.g., e2e4)")
+    
+    def process_input(self, user_input):
+        """Process user input for a move or command"""
+        # Split input to handle both "e2" and "e2e4" formats
+        parts = user_input.lower().strip().split()
+        command = parts[0] if parts else ""
+        
+        # Handle commands
+        if command == 'hint':
+            self.show_move_hint()
+            return False
+        elif command == 'undo':
+            self.undo_move()
+            return False
+        elif command == 'save':
+            self.save_game()
+            return False
+        elif command == 'load':
+            self.prompt_load_game()
+            return False
+        elif command == 'resign':
+            print("You resigned the game.")
+            return True  # Signal game over
+        elif command == 'cancel':
+            self.selected_square = None
+            self.possible_moves = set()
+            self.secondary_moves = set()
+            return False
+        
+        # Handle square selection (e.g., "e2")
+        if len(command) == 2 and self.selected_square is None:
+            # Parse the square
+            file_char, rank_char = command
+            if file_char.isalpha() and rank_char.isdigit():
+                file_idx = ord(file_char) - ord('a')
+                rank_idx = int(rank_char) - 1
+                
+                if 0 <= file_idx < 8 and 0 <= rank_idx < 8:
+                    square = chess.square(file_idx, rank_idx)
+                    piece = self.board.piece_at(square)
+                    
+                    if piece and piece.color == self.human_color:
+                        self.selected_square = square
+                        self.possible_moves = get_legal_moves_from_square(self.board, square)
+                        self.secondary_moves = get_secondary_moves(self.board, square)
+                        print(f"Selected {command}. Enter destination or another command.")
+                        return False
+                    else:
+                        print("No piece of yours at that square.")
+                        return False
+            
+            print("Invalid square notation. Please use format like 'e2'.")
+            return False
+        
+        # Handle complete move (e.g., "e2e4")
+        if len(command) == 4:
+            try:
+                move = chess.Move.from_uci(command)
+                if move in self.board.legal_moves:
+                    # Save the board state before making the move
+                    self.board_history.append(self.board.copy())
+                    
+                    # Make the move
+                    self.board.push(move)
+                    self.last_move = move
+                    self.move_history.append(move.uci())
+                    
+                    # Reset selection state
+                    self.selected_square = None
+                    self.possible_moves = set()
+                    self.secondary_moves = set()
+                    self.highlighted_hint = None
+                    
+                    return True  # Move successfully made
+                else:
+                    print("Illegal move. Try again.")
+            except ValueError:
+                print("Invalid move format. Use format like 'e2e4'.")
+            
+            return False
+        
+        # Handle destination after selecting a piece
+        if len(command) == 2 and self.selected_square is not None:
+            # Parse the destination
+            file_char, rank_char = command
+            if file_char.isalpha() and rank_char.isdigit():
+                file_idx = ord(file_char) - ord('a')
+                rank_idx = int(rank_char) - 1
+                
+                if 0 <= file_idx < 8 and 0 <= rank_idx < 8:
+                    dest_square = chess.square(file_idx, rank_idx)
+                    
+                    if dest_square in self.possible_moves:
+                        move = chess.Move(self.selected_square, dest_square)
+                        
+                        # Check for promotion
+                        piece = self.board.piece_at(self.selected_square)
+                        if piece.piece_type == chess.PAWN:
+                            if (self.human_color == chess.WHITE and rank_idx == 7) or \
+                               (self.human_color == chess.BLACK and rank_idx == 0):
+                                valid_promotions = {'q': chess.QUEEN, 'r': chess.ROOK, 
+                                                  'b': chess.BISHOP, 'n': chess.KNIGHT}
+                                promotion = input("Promote to (q/r/b/n, default=q): ").lower() or 'q'
+                                if promotion in valid_promotions:
+                                    move.promotion = valid_promotions[promotion]
+                                else:
+                                    move.promotion = chess.QUEEN
+                        
+                        # Save board state and make move
+                        self.board_history.append(self.board.copy())
+                        self.board.push(move)
+                        self.last_move = move
+                        self.move_history.append(move.uci())
+                        
+                        # Reset selection state
+                        self.selected_square = None
+                        self.possible_moves = set()
+                        self.secondary_moves = set()
+                        self.highlighted_hint = None
+                        
+                        return True  # Move successfully made
+                    else:
+                        print(f"Invalid destination. {command} is not a legal move.")
+            
+            print("Invalid destination. Please use format like 'e4'.")
+            return False
+        
+        print("Invalid input. Enter a coordinate like 'e2' to select a piece, or 'e2e4' to make a move.")
+        return False
+        
+    def make_ai_move(self):
+        """Let the AI make a move"""
+        if self.board.is_game_over():
+            return
+            
+        if self.board.turn != self.human_color:
+            print("AI is thinking...")
+            start_time = time.time()
+            
+            # Get AI's move
+            self.ai.board = self.board.copy()  # Make sure AI has current board
+            move = self.ai.get_best_move()
+            
+            end_time = time.time()
+            print(f"AI plays: {move.uci()} (took {end_time - start_time:.2f}s)")
+            
+            # Save board state before AI move
+            self.board_history.append(self.board.copy())
+            
+            # Update the board
+            self.board.push(move)
+            self.last_move = move
+            self.move_history.append(move.uci())
+    
+    def undo_move(self):
+        """Undo the last move pair (human + AI)"""
+        # Need at least one move to undo
+        if len(self.move_history) == 0:
+            print("No moves to undo.")
+            return False
+            
+        # If it's the human's turn, we need to undo the last AI move and the human move before that
+        if self.board.turn == self.human_color:
+            # Make sure we have at least two moves to undo (human and AI)
+            if len(self.move_history) >= 2:
+                # Undo the last AI move and the human move before that
+                self.move_history.pop()  # Remove AI move
+                self.move_history.pop()  # Remove human move
+                
+                # Load the board state from before the human's move
+                if len(self.board_history) >= 2:
+                    self.board_history.pop()  # Current state
+                    self.board_history.pop()  # AI's move state
+                    self.board = self.board_history[-1].copy()
+                else:
+                    # Fallback if history is missing
+                    self.board = chess.Board()
+                    for move_uci in self.move_history:
+                        self.board.push(chess.Move.from_uci(move_uci))
+                
+                # Set last move if there are any moves left
+                if self.move_history:
+                    self.last_move = chess.Move.from_uci(self.move_history[-1])
+                else:
+                    self.last_move = None
+                
+                print("Undid last move pair.")
+                
+                # Reset selection state
+                self.selected_square = None
+                self.possible_moves = set()
+                self.secondary_moves = set()
+                
+                # Update the AI's board
+                self.ai.board = self.board.copy()
+                
+                return True
+            else:
+                print("Not enough moves to undo.")
+                return False
+        # If it's the AI's turn, we just need to undo the human's last move
+        else:
+            # Pop the last move
+            self.move_history.pop()
+            
+            # Load previous board state
+            if len(self.board_history) >= 1:
+                self.board = self.board_history.pop().copy()
+            else:
+                # Fallback if history is missing
+                self.board = chess.Board()
+                for move_uci in self.move_history:
+                    self.board.push(chess.Move.from_uci(move_uci))
+            
+            # Set last move if there are any moves left
+            if self.move_history:
+                self.last_move = chess.Move.from_uci(self.move_history[-1])
+            else:
+                self.last_move = None
+            
+            print("Undid last move.")
+            
+            # Reset selection state
+            self.selected_square = None
+            self.possible_moves = set()
+            self.secondary_moves = set()
+            
+            # Update the AI's board
+            self.ai.board = self.board.copy()
+            
+            return True
+    
+    def show_move_hint(self):
+        """Get a hint for the best move from the AI"""
+        if self.board.turn == self.human_color and not self.board.is_game_over():
+            # Temporarily make a copy of the board to not affect the game state
+            board_copy = self.board.copy()
+            self.ai.board = board_copy
+            
+            # Get AI's move suggestion
+            hint_move = self.ai.get_best_move()
+            self.ai.board = self.board  # Restore the original board
+            
+            # Get the move notation
+            from_square_name = chess.square_name(hint_move.from_square)
+            to_square_name = chess.square_name(hint_move.to_square)
+            
+            print(f"Hint: Move {from_square_name} to {to_square_name}")
+            
+            # Store the hint and highlight it
+            self.highlighted_hint = (hint_move.from_square, hint_move.to_square)
+            
+            return hint_move
+        return None
+        
+    def start(self):
+        """Start the chess game"""
+        self.clear_screen()
+        
+        print("Enhanced Terminal Chess Game")
+        print("---------------------------")
+        
+        # Display the initial board
+        self.display_board()
+        
+        # If AI goes first (human is black), let AI make first move
+        if self.human_color == chess.BLACK:
+            self.make_ai_move()
+            self.clear_screen()
+            self.display_board()
+        
+        # Main game loop
+        game_over = False
+        while not game_over:
+            # Get user input for move
+            user_input = input("\nEnter move (e.g., e2e4) or command: ")
+            
+            # Process the input
+            move_made = self.process_input(user_input)
+            
+            # Clear screen and redisplay board
+            self.clear_screen()
+            self.display_board()
+            
+            # Check for game over
+            if self.board.is_game_over():
+                result = self.board.result()
+                if self.board.is_checkmate():
+                    winner = "White" if self.board.turn == chess.BLACK else "Black"
+                    print(f"\nCheckmate! {winner} wins.")
+                elif self.board.is_stalemate():
+                    print("\nGame over. Stalemate.")
+                else:
+                    print(f"\nGame over. Result: {result}")
+                
+                game_over = True
+                continue
+            
+            # If a move was made, let AI respond
+            if move_made:
+                # AI makes its move
+                self.make_ai_move()
+                
+                # Clear screen and redisplay board
+                self.clear_screen()
+                self.display_board()
+                
+                # Check for game over again
+                if self.board.is_game_over():
+                    result = self.board.result()
+                    if self.board.is_checkmate():
+                        winner = "White" if self.board.turn == chess.BLACK else "Black"
+                        print(f"\nCheckmate! {winner} wins.")
+                    elif self.board.is_stalemate():
+                        print("\nGame over. Stalemate.")
+                    else:
+                        print(f"\nGame over. Result: {result}")
+                    
+                    game_over = True
+                    
+        print("\nThanks for playing!")
+```
+
+## File: threaded_board.py
+
+- Extension: .py
+- Language: python
+- Size: 3933 bytes
+- Created: 2025-05-21 06:28:20
+- Modified: 2025-05-21 06:29:35
+
+### Code
+
+```python
+import queue
+import threading
+import time
+import chess
+import matplotlib.pyplot as plt
+from ui import NonClickableChessBoard
+import matplotlib
+matplotlib.use('TkAgg')  # Force interactive backend
+
+class ThreadedChessBoard(NonClickableChessBoard):
+    def __init__(self, board, ai, human_color=chess.WHITE):
+        super().__init__(board, ai, human_color)
+        self.ui_queue = queue.Queue()
+        self.running = True
+        self.ui_thread = None
+        
+    def _ui_thread_function(self):
+        """Run matplotlib in its own thread"""
+        plt.ion()  # Interactive mode
+        
+        # Initial board setup
+        self.update_board()
+        
+        # If AI goes first (human is black), let AI make first move
+        if self.human_color == chess.BLACK:
+            # Signal the main thread to make AI move
+            self.ui_queue.put(("ai_move", None))
+        
+        # UI thread loop
+        while self.running:
+            try:
+                # Process any pending UI updates
+                if self.fig is None:
+                    self.update_board()
+                
+                # Keep the UI responsive
+                plt.pause(0.1)
+            except Exception as e:
+                print(f"UI thread error: {e}")
+                break
+                
+        # Clean up
+        plt.close('all')
+        
+    def start(self):
+        """Start the chess game with proper threading"""
+        print("Interactive Chess Game (Threaded Version)")
+        print("----------------------------------------")
+        print("Enter coordinates to select pieces and make moves.")
+        print("Available commands:")
+        print("- hint: Get a move suggestion")
+        print("- undo: Take back your last move")
+        print("- save: Save the current game")
+        print("- load: Load a previously saved game")
+        print("- resign: Resign the current game")
+        print("- cancel: Cancel your current piece selection")
+        
+        # Start UI thread
+        self.ui_thread = threading.Thread(target=self._ui_thread_function)
+        self.ui_thread.daemon = True
+        self.ui_thread.start()
+        
+        # Main game loop (in main thread)
+        game_over = False
+        while not game_over and self.running:
+            try:
+                # Check for messages from UI thread
+                try:
+                    message_type, data = self.ui_queue.get(block=False)
+                    if message_type == "ai_move":
+                        self.make_ai_move()
+                        self.ui_queue.task_done()
+                except queue.Empty:
+                    pass
+                
+                # Human's turn
+                if self.board.turn == self.human_color:
+                    move_made = self.process_input()
+                    
+                    if move_made:
+                        # Check if game is over
+                        if self.board.is_game_over():
+                            game_over = True
+                            continue
+                        
+                        # If not game over, AI makes its move
+                        self.make_ai_move()
+                        
+                        # Check again if game is over
+                        if self.board.is_game_over():
+                            game_over = True
+                
+                # Small delay to prevent CPU overuse
+                time.sleep(0.1)
+            
+            except KeyboardInterrupt:
+                break
+            except Exception as e:
+                print(f"Game error: {e}")
+                break
+        
+        # Clean up
+        self.running = False
+        if self.ui_thread and self.ui_thread.is_alive():
+            self.ui_thread.join(timeout=1.0)  # Wait for UI thread to exit
+        
+        print("Game finished.")
+```
+
 ## File: ui.py
 
 - Extension: .py
 - Language: python
-- Size: 28087 bytes
+- Size: 28483 bytes
 - Created: 2025-05-19 19:42:41
-- Modified: 2025-05-20 20:09:14
+- Modified: 2025-05-21 06:28:42
 
 ### Code
 
@@ -4387,6 +4948,12 @@ from constants import (
 )
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+# At the beginning of your ui.py file
+import matplotlib
+matplotlib.use('Agg')  # Use the Agg backend which doesn't require tkinter
+import threading
+import queue
+import time
 
 class NonClickableChessBoard:
     def __init__(self, board, ai, human_color=chess.WHITE):
@@ -4904,7 +5471,7 @@ class NonClickableChessBoard:
         # Add text showing available commands
         commands_text = "Commands: 'hint', 'undo', 'save', 'load', 'resign', 'cancel'"
         plt.figtext(0.5, 0.05, commands_text, ha='center', fontsize=12)
-    
+        
     def start(self):
         """Start the interactive chess game without clicking"""
         plt.ion()  # Turn on interactive mode
@@ -4927,29 +5494,32 @@ class NonClickableChessBoard:
         if self.human_color == chess.BLACK:
             self.make_ai_move()
         
-        # Main game loop
-        while not game_over:
-            if self.board.turn == self.human_color:
-                # Human's turn - get input
-                move_made = self.process_input()
-                
-                # If a move was made, let AI respond
-                if move_made:
-                    game_over = self.update_board()
-                    if not game_over:
-                        # Pause briefly before AI move
-                        plt.pause(0.5)
-                        self.make_ai_move()
+        try:
+            # Main game loop
+            while not game_over:
+                if self.board.turn == self.human_color:
+                    # Human's turn - get input
+                    move_made = self.process_input()
+                    
+                    # If a move was made, let AI respond
+                    if move_made:
                         game_over = self.update_board()
-            else:
-                # AI's turn
-                self.make_ai_move()
-                game_over = self.update_board()
-        
-        # Keep the figure open
-        plt.ioff()
-        plt.show(block=True)
-
+                        if not game_over:
+                            # Pause briefly before AI move
+                            plt.pause(0.5)
+                            self.make_ai_move()
+                            game_over = self.update_board()
+                else:
+                    # AI's turn
+                    self.make_ai_move()
+                    game_over = self.update_board()
+            
+            # Keep the figure open
+            plt.ioff()
+            plt.show(block=True)
+        finally:
+            # Ensure proper cleanup when the game ends or is interrupted
+            plt.close('all')
 def create_visual_chess_board(board, last_move=None, threatened_squares=None, 
                              guarded_squares=None, selected_square=None, possible_moves=None, 
                              secondary_moves=None, highlighted_hint=None, evaluation=None, fig_size=(10, 10)):

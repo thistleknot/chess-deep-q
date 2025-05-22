@@ -8,7 +8,6 @@ from functools import lru_cache
 EVAL_CACHE = {}
 CACHE_LOCK = threading.Lock()
 
-
 # Board Representation & Fast Utility Functions
 def board_to_tensor(board):
     """Convert a chess board to a compact tensor representation"""
@@ -40,26 +39,11 @@ def board_to_tensor(board):
     
     return tensor
 
-def boards_to_tensor_batch(boards):
-    """Convert a list of boards to a batch tensor"""
-    batch_size = len(boards)
-    tensor_batch = torch.zeros(batch_size, 12, 8, 8)
-    
-    for b_idx, board in enumerate(boards):
-        tensor_batch[b_idx] = board_to_tensor(board)
-    
-    return tensor_batch
-
-
 @lru_cache(maxsize=5000)
 def get_valid_moves_cached(board_fen):
     """Get valid moves for a board position, using caching for efficiency"""
     board = chess.Board(board_fen)
     return list(board.legal_moves)
-
-def get_valid_moves(board):
-    """Get valid moves with caching"""
-    return get_valid_moves_cached(board.fen())
 
 def get_move_uci(move):
     """Convert a chess.Move to UCI format string (e.g., 'e2e4')"""

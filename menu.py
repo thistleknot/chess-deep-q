@@ -12,6 +12,8 @@ from terminal_board import TerminalChessBoard
 def display_full_menu(chess_ai):
     """Display the full menu of options after the initial workflow"""
     print("\nChess AI Menu:")
+    """Display the full menu of options after the initial workflow"""
+    print("\nChess AI Menu:")
     print("1. Play against AI (human as white)")
     print("2. Play against AI (human as black)")
     print("3. Watch AI play against itself")
@@ -25,7 +27,9 @@ def display_full_menu(chess_ai):
     print("11. Toggle enhanced features")
     print("12. Plot final game scores")
     print("13. Evaluate ELO rating")
-    print("14. Exit")
+    print("14. Toggle AHA Learning")
+    print("15. Configure AHA Learning settings") 
+    print("16. Exit")
     # Removed the infinite while loop that was here
 
 
@@ -180,11 +184,28 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
             
             if estimated_elo:
                 print(f"\nYour model's estimated ELO rating: {estimated_elo}")
+        # In handle_menu_selections:
         elif choice == '14':
-            print("Exiting the Chess AI program. Goodbye!")
-            break
+            current_state = getattr(chess_ai.dqn_agent, 'use_aha_learning', False)
+            chess_ai.dqn_agent.use_aha_learning = not current_state
+            print(f"AHA Learning {'enabled' if chess_ai.dqn_agent.use_aha_learning else 'disabled'}")
+
+        elif choice == '15':
+            print(f"Current AHA settings:")
+            print(f"  Budget per game: {chess_ai.dqn_agent.aha_budget_per_game}")
+            print(f"  Evaluation threshold: {chess_ai.dqn_agent.aha_threshold}")
+            
+            try:
+                new_budget = int(input(f"Enter new budget per game (current: {chess_ai.dqn_agent.aha_budget_per_game}): ") or chess_ai.dqn_agent.aha_budget_per_game)
+                new_threshold = float(input(f"Enter new threshold (current: {chess_ai.dqn_agent.aha_threshold}): ") or chess_ai.dqn_agent.aha_threshold)
+                
+                chess_ai.dqn_agent.aha_budget_per_game = new_budget
+                chess_ai.dqn_agent.aha_threshold = new_threshold
+                print("AHA Learning settings updated!")
+            except ValueError:
+                print("Invalid input. Settings unchanged.")
         else:
-            print("Invalid choice. Please enter a number between 1 and 14.")
+            print("Invalid choice. Please enter a number between 1 and 15.")
     
     # Return the updated feature flags
     return verbose, use_visual_board, use_enhanced_features
@@ -195,7 +216,7 @@ def main():
     print("------------------------------------------------------------")
     
     # Create the AI with default settings
-    chess_ai = OptimizedChessAI(training_games=20, verbose=False)
+    chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=True)
     
     # First, determine the user's primary goal
     print("\nWhat would you like to do?")

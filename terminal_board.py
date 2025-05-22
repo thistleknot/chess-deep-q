@@ -35,12 +35,15 @@ class TerminalChessBoard:
         threatened_squares = find_threatened_squares(self.board)
         guarded_squares = find_guarded_squares(self.board)
         
+        # Find contested squares (both threatened and guarded)
+        contested_squares = threatened_squares & guarded_squares
+        
         # Print turn and evaluation at the top
         turn = "White" if self.board.turn == chess.WHITE else "Black"
         eval_prefix = "+" if evaluation > 0 else ""
         
         print(f"\n{turn} to move | Eval: {eval_prefix}{evaluation:.2f}")
-        print("  " + "-" * 33)
+        print("  " + "-" * 17)  # Adjusted for proper alignment
         
         # Unicode chess pieces
         piece_symbols = {
@@ -51,7 +54,7 @@ class TerminalChessBoard:
         
         # Display board - with white at the bottom
         for rank in range(7, -1, -1):
-            print(f"{rank+1} |", end=" ")
+            print(f"{rank+1} |", end="")
             for file in range(8):
                 square = chess.square(file, rank)
                 piece = self.board.piece_at(square)
@@ -60,7 +63,7 @@ class TerminalChessBoard:
                 # Determine background color based on square type and highlights
                 bg_color = Back.LIGHTBLACK_EX if (file + rank) % 2 == 1 else Back.BLACK
                 
-                # Apply highlights
+                # Priority-based highlighting (most important first)
                 if self.selected_square == square:
                     bg_color = Back.YELLOW
                 elif square in self.possible_moves:
@@ -69,6 +72,10 @@ class TerminalChessBoard:
                     bg_color = Back.MAGENTA
                 elif self.last_move and (square == self.last_move.from_square or square == self.last_move.to_square):
                     bg_color = Back.BLUE
+                elif square in contested_squares:
+                    # Contested squares: both threatened and guarded
+                    # Use a distinctive color - yellow for contested
+                    bg_color = Back.LIGHTYELLOW_EX
                 elif square in threatened_squares:
                     bg_color = Back.RED
                 elif square in guarded_squares:
@@ -77,30 +84,94 @@ class TerminalChessBoard:
                 # Determine text color based on piece color
                 if piece:
                     text_color = Fore.WHITE if piece.color == chess.WHITE else Fore.BLACK
+                    # For better contrast on certain backgrounds
+                    if bg_color in [Back.YELLOW, Back.LIGHTYELLOW_EX, Back.CYAN]:
+                        text_color = Fore.BLACK
                 else:
                     text_color = Fore.WHITE
                 
-                # Print the square
+                # Print the square (piece + space for alignment)
                 print(f"{bg_color}{text_color}{square_symbol} {Style.RESET_ALL}", end="")
             print("|")
         
-        print("  " + "-" * 33)
-        print("    a  b  c  d  e  f  g  h")
+        print("  " + "-" * 17)  # Adjusted for proper alignment
+        print("   a b c d e f g h")  # Properly aligned coordinates
         
-        # Legend
+        # Enhanced Legend
         print("\nHighlight Legend:")
-        print(f"{Back.YELLOW}     {Style.RESET_ALL} Selected piece   ", end="")
-        print(f"{Back.GREEN}     {Style.RESET_ALL} Possible moves   ", end="")
-        print(f"{Back.MAGENTA}     {Style.RESET_ALL} Secondary moves")
-        print(f"{Back.BLUE}     {Style.RESET_ALL} Last move        ", end="")
-        print(f"{Back.RED}     {Style.RESET_ALL} Threatened        ", end="")
-        print(f"{Back.CYAN}     {Style.RESET_ALL} Guarded")
+        print(f"{Back.YELLOW}   {Style.RESET_ALL} Selected piece     ", end="")
+        print(f"{Back.GREEN}   {Style.RESET_ALL} Possible moves     ", end="")
+        print(f"{Back.MAGENTA}   {Style.RESET_ALL} Secondary moves")
+        print(f"{Back.BLUE}   {Style.RESET_ALL} Last move          ", end="")
+        print(f"{Back.LIGHTYELLOW_EX}   {Style.RESET_ALL} Contested (T+G)    ", end="")
+        print(f"{Back.RED}   {Style.RESET_ALL} Threatened only")
+        print(f"{Back.CYAN}   {Style.RESET_ALL} Guarded only")
         
         # Available commands
         print("\nCommands: 'hint', 'undo', 'save', 'load', 'resign', 'cancel', or enter move (e.g., e2e4)")
+        
+        # Show current selection info if any
+        if self.selected_square is not None:
+            square_name = chess.square_name(self.selected_square)
+            piece = self.board.piece_at(self.selected_square)
+            piece_name = piece.symbol().upper() if piece else "Empty"
+            print(f"\nSelected: {square_name} ({piece_name})")
+            
+            if self.possible_moves:
+                move_names = [chess.square_name(sq) for sq in sorted(self.possible_moves)]
+                print(f"Possible moves: {', '.join(move_names)}")
+                
+            if self.secondary_moves:
+                secondary_names = [chess.square_name(sq) for sq in sorted(self.secondary_moves)]
+                print(f"Secondary moves: {', '.join(secondary_names)}")
+    
+    def enhanced_human_move(self, current_input=""):
+        """
+        Enhanced move input function that shows possible moves as user types
+        This is the ASCII version of the matplotlib enhanced_human_move
+        """
+        if len(current_input) == 2:  # First square entered (e.g., "e2")
+            from_square = self.square_name_to_square(current_input)
+            if from_square is not None and self.board.piece_at(from_square):
+                piece = self.board.piece_at(from_square)
+                if piece.color == self.board.turn:
+                    # Update the display state
+                    self.selected_square = from_square
+                    self.possible_moves = get_legal_moves_from_square(self.board, from_square)
+                    self.secondary_moves = get_secondary_moves(self.board, from_square)
+                    
+                    # Refresh the display
+                    self.clear_screen()
+                    self.display_board()
+                    
+                    return from_square, self.possible_moves, self.secondary_moves, current_input
+        
+        elif len(current_input) == 4:  # Complete move entered (e.g., "e2e4")
+            try:
+                move = chess.Move.from_uci(current_input)
+                if move in self.board.legal_moves:
+                    return move, set(), set(), ""  # Return the move and reset input
+            except ValueError:
+                pass  # Invalid move format
+        
+        # If we get here, the input is incomplete or invalid
+        return None, set(), set(), current_input
+    
+    def square_name_to_square(self, square_name):
+        """Convert square name (e.g., 'e4') to a square number"""
+        try:
+            file_char, rank_char = square_name.lower()
+            file_idx = ord(file_char) - ord('a')
+            rank_idx = int(rank_char) - 1
+            
+            if 0 <= file_idx < 8 and 0 <= rank_idx < 8:
+                return chess.square(file_idx, rank_idx)
+            return None
+        except:
+            return None
     
     def process_input(self, user_input):
-        """Process user input for a move or command"""
+        """Process user input for a move or command with enhanced features"""
         # Split input to handle both "e2" and "e2e4" formats
         parts = user_input.lower().strip().split()
         command = parts[0] if parts else ""
@@ -125,34 +196,75 @@ class TerminalChessBoard:
             self.selected_square = None
             self.possible_moves = set()
             self.secondary_moves = set()
+            self.clear_screen()
+            self.display_board()
             return False
         
-        # Handle square selection (e.g., "e2")
-        if len(command) == 2 and self.selected_square is None:
-            # Parse the square
-            file_char, rank_char = command
-            if file_char.isalpha() and rank_char.isdigit():
-                file_idx = ord(file_char) - ord('a')
-                rank_idx = int(rank_char) - 1
-                
-                if 0 <= file_idx < 8 and 0 <= rank_idx < 8:
-                    square = chess.square(file_idx, rank_idx)
-                    piece = self.board.piece_at(square)
-                    
-                    if piece and piece.color == self.human_color:
-                        self.selected_square = square
-                        self.possible_moves = get_legal_moves_from_square(self.board, square)
-                        self.secondary_moves = get_secondary_moves(self.board, square)
-                        print(f"Selected {command}. Enter destination or another command.")
-                        return False
-                    else:
-                        print("No piece of yours at that square.")
-                        return False
+        # Use enhanced move processing
+        result, new_possible_moves, new_secondary_moves, updated_input = self.enhanced_human_move(command)
+        
+        if isinstance(result, chess.Move):
+            # Complete move entered
+            move = result
             
-            print("Invalid square notation. Please use format like 'e2'.")
+            # Save the board state before making the move
+            self.board_history.append(self.board.copy())
+            
+            # Make the move
+            self.board.push(move)
+            self.last_move = move
+            self.move_history.append(move.uci())
+            
+            # Reset selection state
+            self.selected_square = None
+            self.possible_moves = set()
+            self.secondary_moves = set()
+            self.highlighted_hint = None
+            
+            return True  # Move successfully made
+            
+        elif isinstance(result, int):
+            # Square selected, highlights already updated by enhanced_human_move
             return False
+            
+        elif result is None and len(command) == 2:
+            # Potential destination after selecting a piece
+            if self.selected_square is not None:
+                dest_square = self.square_name_to_square(command)
+                if dest_square is not None and dest_square in self.possible_moves:
+                    move = chess.Move(self.selected_square, dest_square)
+                    
+                    # Check for promotion
+                    piece = self.board.piece_at(self.selected_square)
+                    if piece.piece_type == chess.PAWN:
+                        if (self.human_color == chess.WHITE and chess.square_rank(dest_square) == 7) or \
+                           (self.human_color == chess.BLACK and chess.square_rank(dest_square) == 0):
+                            valid_promotions = {'q': chess.QUEEN, 'r': chess.ROOK, 
+                                              'b': chess.BISHOP, 'n': chess.KNIGHT}
+                            promotion = input("Promote to (q/r/b/n, default=q): ").lower() or 'q'
+                            if promotion in valid_promotions:
+                                move.promotion = valid_promotions[promotion]
+                            else:
+                                move.promotion = chess.QUEEN
+                    
+                    # Save board state and make move
+                    self.board_history.append(self.board.copy())
+                    self.board.push(move)
+                    self.last_move = move
+                    self.move_history.append(move.uci())
+                    
+                    # Reset selection state
+                    self.selected_square = None
+                    self.possible_moves = set()
+                    self.secondary_moves = set()
+                    self.highlighted_hint = None
+                    
+                    return True  # Move successfully made
+                else:
+                    print(f"Invalid destination. {command} is not a legal move.")
+                    return False
         
-        # Handle complete move (e.g., "e2e4")
+        # Handle complete move format (e.g., "e2e4")
         if len(command) == 4:
             try:
                 move = chess.Move.from_uci(command)
@@ -177,52 +289,6 @@ class TerminalChessBoard:
             except ValueError:
                 print("Invalid move format. Use format like 'e2e4'.")
             
-            return False
-        
-        # Handle destination after selecting a piece
-        if len(command) == 2 and self.selected_square is not None:
-            # Parse the destination
-            file_char, rank_char = command
-            if file_char.isalpha() and rank_char.isdigit():
-                file_idx = ord(file_char) - ord('a')
-                rank_idx = int(rank_char) - 1
-                
-                if 0 <= file_idx < 8 and 0 <= rank_idx < 8:
-                    dest_square = chess.square(file_idx, rank_idx)
-                    
-                    if dest_square in self.possible_moves:
-                        move = chess.Move(self.selected_square, dest_square)
-                        
-                        # Check for promotion
-                        piece = self.board.piece_at(self.selected_square)
-                        if piece.piece_type == chess.PAWN:
-                            if (self.human_color == chess.WHITE and rank_idx == 7) or \
-                               (self.human_color == chess.BLACK and rank_idx == 0):
-                                valid_promotions = {'q': chess.QUEEN, 'r': chess.ROOK, 
-                                                  'b': chess.BISHOP, 'n': chess.KNIGHT}
-                                promotion = input("Promote to (q/r/b/n, default=q): ").lower() or 'q'
-                                if promotion in valid_promotions:
-                                    move.promotion = valid_promotions[promotion]
-                                else:
-                                    move.promotion = chess.QUEEN
-                        
-                        # Save board state and make move
-                        self.board_history.append(self.board.copy())
-                        self.board.push(move)
-                        self.last_move = move
-                        self.move_history.append(move.uci())
-                        
-                        # Reset selection state
-                        self.selected_square = None
-                        self.possible_moves = set()
-                        self.secondary_moves = set()
-                        self.highlighted_hint = None
-                        
-                        return True  # Move successfully made
-                    else:
-                        print(f"Invalid destination. {command} is not a legal move.")
-            
-            print("Invalid destination. Please use format like 'e4'.")
             return False
         
         print("Invalid input. Enter a coordinate like 'e2' to select a piece, or 'e2e4' to make a move.")
@@ -349,6 +415,25 @@ class TerminalChessBoard:
             
             # Store the hint and highlight it
             self.highlighted_hint = (hint_move.from_square, hint_move.to_square)
+            
+            # Temporarily highlight the hint
+            temp_selected = self.selected_square
+            temp_possible = self.possible_moves.copy()
+            temp_secondary = self.secondary_moves.copy()
+            
+            self.selected_square = hint_move.from_square
+            self.possible_moves = {hint_move.to_square}
+            self.secondary_moves = set()
+            
+            self.clear_screen()
+            self.display_board()
+            
+            input("Press Enter to continue...")
+            
+            # Restore previous state
+            self.selected_square = temp_selected
+            self.possible_moves = temp_possible
+            self.secondary_moves = temp_secondary
             
             return hint_move
         return None
