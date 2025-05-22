@@ -66,18 +66,16 @@ class TerminalChessBoard:
                 # Priority-based highlighting (most important first)
                 if self.selected_square == square:
                     bg_color = Back.YELLOW
+                elif square in contested_squares:
+                    bg_color = Back.LIGHTYELLOW_EX
+                elif square in threatened_squares:
+                    bg_color = Back.RED
                 elif square in self.possible_moves:
                     bg_color = Back.GREEN
                 elif square in self.secondary_moves:
                     bg_color = Back.MAGENTA
                 elif self.last_move and (square == self.last_move.from_square or square == self.last_move.to_square):
                     bg_color = Back.BLUE
-                elif square in contested_squares:
-                    # Contested squares: both threatened and guarded
-                    # Use a distinctive color - yellow for contested
-                    bg_color = Back.LIGHTYELLOW_EX
-                elif square in threatened_squares:
-                    bg_color = Back.RED
                 elif square in guarded_squares:
                     bg_color = Back.CYAN
                 
