@@ -36,10 +36,9 @@ class ChessQNetwork(nn.Module):
         
         return x
 
-# DQN Agent Implementation
 class DQNAgent:
     def __init__(self, gamma=0.99, epsilon=0.1, epsilon_min=0.1, epsilon_decay=0.995, learning_rate=0.001,
-                 batch_size=64):
+                 batch_size=64, use_aha_learning=False):
         self.gamma = gamma  # discount factor
         self.epsilon = epsilon  # exploration rate
         self.epsilon_min = epsilon_min
@@ -48,6 +47,15 @@ class DQNAgent:
         self.batch_size = batch_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
+        
+        # AHA Learning parameters
+        self.use_aha_learning = use_aha_learning
+        self.aha_budget_per_game = 3  # Max aha moments per game
+        self.aha_budget_remaining = 3
+        self.aha_threshold = -1.5  # Trigger when eval drops by this much
+        
+        if self.use_aha_learning:
+            print("AHA Learning enabled - AI can correct mistakes during training")
         
         # Q-Networks
         self.q_network = ChessQNetwork().to(self.device)
@@ -68,13 +76,50 @@ class DQNAgent:
         """Efficient implementation of 'aha moment' learning"""
         if not is_training or undo_budget <= 0:
             # Regular move selection during gameplay or when out of undos
-            return self.select_move(board, is_training=is_training)
+            return self.select_move(board, training_progress, is_training=is_training)
         
         # Get current evaluation
+        from evaluation import fast_evaluate_position
         current_eval = fast_evaluate_position(board)
         
-        # Standard move selection
-        move = self.select_move(board, is_training=is_training)
+        # Standard move selection (call the regular MCTS logic directly to avoid recursion)
+        # For gameplay (not training), always use MCTS with no exploration
+        if not is_training:
+            training_progress = 1.0  # Force minimum exploration
+            current_move = 200  # Force minimum exploration
+        
+        # Adjust MCTS iterations and parameters based on training progress
+        base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
+        exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
+        
+        # Adjust sampling width at each level based on training progress
+        samples_per_level = [
+            max(21, int(25 * (1 - 0.3 * training_progress))),  # Level 1
+            max(13, int(15 * (1 - 0.3 * training_progress))),  # Level 2
+            max(8, int(10 * (1 - 0.3 * training_progress))),   # Level 3
+            max(5, int(7 * (1 - 0.3 * training_progress))),    # Level 4
+            max(3, int(5 * (1 - 0.3 * training_progress))),    # Level 5
+            max(2, int(3 * (1 - 0.3 * training_progress))),    # Level 6
+            max(1, int(2 * (1 - 0.3 * training_progress)))     # Level 7
+        ]
+        
+        # Use parallel MCTS with annealing parameters
+        from mcts import ParallelRussianDollMCTS
+        mcts = ParallelRussianDollMCTS(
+            board, 
+            iterations=base_iterations,
+            exploration_weight=exploration_weight,
+            samples_per_level=samples_per_level,
+            num_workers=self.num_cpu_cores
+        )
+        
+        move = mcts.search(
+            neural_net=self.q_network, 
+            device=self.device,
+            training_progress=training_progress,
+            current_move=0,
+            max_moves=200
+        )
         
         # Quick look-ahead to check if this move is a mistake
         test_board = board.copy()
@@ -89,15 +134,13 @@ class DQNAgent:
             return move
         
         # At this point, we've detected a significant mistake
+        print(f"AHA! Detected potential mistake (eval change: {eval_change:.2f})")
         
         # Step 1: Create immediate learning signal (most important part)
+        from board_utils import board_to_tensor
         state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
-        next_state_tensor = board_to_tensor(test_board).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            # Get current Q-value for this state-action pair
-            current_q = self.q_network(state_tensor).item()
-            
             # Get target value (immediate negative reward)
             target_q = -1.0  # Strong negative reward for mistake
         
@@ -128,11 +171,16 @@ class DQNAgent:
         
         # If no better moves, return original despite the mistake
         if not better_moves:
+            print("No better alternatives found, keeping original move")
             return move
         
         # Sort by evaluation (best first) and pick the best
         better_moves.sort(key=lambda x: x[1], reverse=True)
         better_move = better_moves[0][0]
+        
+        # Decrement the budget since we used an AHA moment
+        self.aha_budget_remaining -= 1
+        print(f"AHA moment used! Corrected {move.uci()} → {better_move.uci()}. Remaining budget: {self.aha_budget_remaining}")
         
         # Return the better move
         return better_move
@@ -150,7 +198,19 @@ class DQNAgent:
     def select_move(self, board, training_progress=0.0, is_training=False, current_move=0, max_moves=200):
         """
         Select a move using Russian Doll MCTS with neural network guidance
+        Optionally uses AHA learning for mistake correction during training
         """
+        # Use AHA learning if enabled, during training, and budget available
+        if (hasattr(self, 'use_aha_learning') and self.use_aha_learning and 
+            is_training and hasattr(self, 'aha_budget_remaining') and 
+            self.aha_budget_remaining > 0 and current_move > 5):  # Don't trigger in opening
+            
+            return self.select_move_with_aha_learning(
+                board, training_progress, is_training, 
+                self.aha_budget_remaining, self.aha_threshold
+            )
+        
+        # Regular MCTS move selection (existing logic)
         # For gameplay (not training), always use MCTS with no exploration
         if not is_training:
             training_progress = 1.0  # Force minimum exploration

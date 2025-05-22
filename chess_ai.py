@@ -20,8 +20,8 @@ from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK
 
 # Optimized Chess AI class
 class OptimizedChessAI:
-    def __init__(self, training_games=20, verbose=False):
-        self.dqn_agent = DQNAgent()
+    def __init__(self, training_games=20, verbose=False, use_aha_learning=False):
+        self.dqn_agent = DQNAgent(use_aha_learning=use_aha_learning)
         self.training_games = training_games
         self.board = chess.Board()
         self.game_history = []
@@ -111,10 +111,18 @@ class OptimizedChessAI:
         
         plt.tight_layout()
         plt.show()
+
     # 2. Modify the self_play_game method to display scores and track them for plotting
     def self_play_game(self, max_moves=200):
         """Play a game against itself and store the transitions for learning"""
         self.reset_board()
+        
+        # Reset AHA learning budget for new game
+        if hasattr(self.dqn_agent, 'use_aha_learning') and self.dqn_agent.use_aha_learning:
+            self.dqn_agent.aha_budget_remaining = self.dqn_agent.aha_budget_per_game
+            if self.verbose:
+                print(f"AHA Learning enabled for this game. Budget: {self.dqn_agent.aha_budget_remaining}")
+        
         move_count = 0
         game_moves = []
         
