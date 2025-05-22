@@ -8,6 +8,23 @@
 python main.py
 ```
 
+## 🖼️ Interface Demo
+
+### Enhanced Terminal Chess Interface
+
+| Version 1.0 | Version 1.1 |
+|--------------|-------------|
+| ![Chess v1.0](images/chess-v1.0.png) | ![Chess v1.1](images/chess-v1.1.png) |
+
+**Key Visual Features:**
+- 🟡 **Selected Piece** - Yellow highlighting
+- 🟢 **Possible Moves** - Green squares  
+- 🟣 **Secondary Moves** - Magenta (2-move sequences)
+- 🔵 **Last Move** - Blue highlighting
+- 🔴 **Threatened Squares** - Red background
+- 🟦 **Guarded Squares** - Cyan background
+- 🟨 **Contested Squares** - Yellow (both threatened + guarded)
+
 ## ✨ What Makes This Different
 
 ### 🧠 AHA Learning - Learning from Mistakes in Real Time
