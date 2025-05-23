@@ -12,9 +12,17 @@ python main.py
 
 ### Enhanced Terminal Chess Interface
 
-| Version 1.0 | Version 1.1 |
-|--------------|-------------|
-| ![Chess v1.0](images/chess-v1.0.png) | ![Chess v1.1](images/chess-v1.1.png) |
+Releases
+
+1.0 Initial Release with kitten caboodle
+1.1 Aha learning disabled by default
+1.2 Better color matching
+1.3 Bug fixes with Claude 4
+
+Current Version
+| Version 1.3 |
+|--------------|
+| ![Chess v1.3](images/chess-v1.3.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
