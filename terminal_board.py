@@ -4,7 +4,7 @@ import os
 import time
 from colorama import Fore, Back, Style
 from evaluation import fast_evaluate_position, find_threatened_squares, find_guarded_squares
-from board_utils import get_legal_moves_from_square, get_secondary_moves
+from board_utils import get_legal_moves_from_square, get_secondary_moves, get_move_uci
 
 # Initialize colorama for cross-platform terminal colors
 colorama.init()

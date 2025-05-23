@@ -55,7 +55,7 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '2':
             if use_enhanced_features and use_visual_board:
                 # Use the non-clickable board with enhanced features
-                threaded_board = ThreadedChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
+                threaded_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
                 terminal_board.start()
             elif use_visual_board:
                 visual_play_game(chess_ai, human_color=chess.BLACK)

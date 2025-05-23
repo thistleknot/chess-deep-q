@@ -69,41 +69,29 @@ def fast_evaluate_position(board, ignore_checkmate=False):
     black_material = sum(len(board.pieces(piece_type, chess.BLACK)) * value 
                       for piece_type, value in PIECE_VALUES.items())
     material_score = white_material - black_material
-    
+        
     # 2. Mobility - count legal moves and threatened squares
     white_mobility = 0
     black_mobility = 0
-    
-    # Save original turn
-    original_turn = board.turn
-    
-    # Calculate white's mobility
-    if board.turn != chess.WHITE:
-        board.push(chess.Move.null())  # Switch to white's turn
-    white_mobility = len(list(board.legal_moves))
-    
-    # Calculate attacked squares by white
+
+    # Create board copies to calculate mobility for each side
+    white_board = board.copy()
+    white_board.turn = chess.WHITE
+    white_mobility = len(list(white_board.legal_moves))
+
+    black_board = board.copy()
+    black_board.turn = chess.BLACK
+    black_mobility = len(list(black_board.legal_moves))
+
+    # Calculate attacked squares by both sides (no need to change turns)
     white_attacked = set()
+    black_attacked = set()
+
     for square in chess.SQUARES:
         if board.is_attacked_by(chess.WHITE, square):
             white_attacked.add(square)
-    
-    if board.turn != original_turn:
-        board.push(chess.Move.null())  # Restore turn
-    
-    # Calculate black's mobility
-    if board.turn != chess.BLACK:
-        board.push(chess.Move.null())  # Switch to black's turn
-    black_mobility = len(list(board.legal_moves))
-    
-    # Calculate attacked squares by black
-    black_attacked = set()
-    for square in chess.SQUARES:
         if board.is_attacked_by(chess.BLACK, square):
             black_attacked.add(square)
-            
-    if board.turn != original_turn:
-        board.push(chess.Move.null())  # Restore turn
     
     mobility_score = (white_mobility - black_mobility) * 0.1
     control_score = (len(white_attacked) - len(black_attacked)) * 0.05
@@ -424,27 +412,21 @@ def calculate_attack_range(board, color):
     
     return attack_squares
 
+# REPLACE the calculate_movement_range function in evaluation.py with this:
+
 def calculate_movement_range(board, color):
     """Calculate all squares a player of given color could move to in one move"""
     movement_squares = set()
     
-    # Save original turn
-    original_turn = board.turn
-    
-    # Set turn to the color we're calculating for
-    if board.turn != color:
-        board.push(chess.Move.null())
+    # Create a board copy and set the turn to the desired color
+    temp_board = board.copy()
+    temp_board.turn = color
     
     # For each legal move, add the destination square
-    for move in board.legal_moves:
+    for move in temp_board.legal_moves:
         movement_squares.add(move.to_square)
     
-    # Restore original turn if needed
-    if original_turn != board.turn:
-        board.push(chess.Move.null())
-    
     return movement_squares
-
 def format_score(score):
     """Format a score properly without special symbols for checkmate"""
     # We'll use a consistent numerical format for all scores

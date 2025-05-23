@@ -5,6 +5,12 @@ import chess
 import os
 import sys
 
+# ADD THESE MISSING IMPORTS:
+import logging
+import functools
+import traceback
+from datetime import datetime
+
 # Set matplotlib backend BEFORE any other matplotlib imports
 import matplotlib
 matplotlib.use('TkAgg')  # Force TkAgg backend which is interactive
@@ -23,6 +29,13 @@ from menu import main as menu_main
 def setup_environment():
     """Setup the environment for the chess AI"""
     # Check if required packages are installed
+    # Set all random seeds here
+    np.random.seed(42)
+    torch.manual_seed(42)
+    random.seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+        
     required_packages = ['numpy', 'torch', 'chess', 'matplotlib']
     missing_packages = []
     
@@ -57,11 +70,90 @@ def setup_environment():
     
     return device
 
+import traceback
+
+# STEP 2: ADD this decorator function (but keep your existing functions):
+def comprehensive_error_logger(func):
+    """
+    Decorator that sets up comprehensive logging for the entire application.
+    Catches ALL errors that bubble up and logs them to a file.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Create logs directory if it doesn't exist
+        os.makedirs("logs", exist_ok=True)
+        
+        # Set up logging with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"logs/chess_ai_{timestamp}.log"
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_filename),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        logger = logging.getLogger(__name__)
+        
+        # Custom exception handler to log uncaught exceptions
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            
+            logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+            print(f"\n{'='*60}")
+            print("CRITICAL ERROR LOGGED!")
+            print(f"Check log file: {log_filename}")
+            print(f"Error: {exc_value}")
+            print(f"{'='*60}")
+        
+        # Set the custom exception handler
+        sys.excepthook = handle_exception
+        
+        # Log startup
+        logger.info("="*60)
+        logger.info("CHESS AI APPLICATION STARTED")
+        logger.info(f"Log file: {log_filename}")
+        logger.info("="*60)
+        
+        try:
+            logger.info("Starting main application function...")
+            result = func(*args, **kwargs)
+            logger.info("Main application function completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.critical(f"Exception in main function: {e}")
+            logger.critical("Full traceback:")
+            logger.critical(traceback.format_exc())
+            
+            print(f"\n{'='*60}")
+            print("MAIN FUNCTION ERROR!")
+            print(f"Error: {e}")
+            print(f"Full details logged to: {log_filename}")
+            print(f"{'='*60}")
+            
+            raise
+            
+        finally:
+            logger.info("Chess AI application session ended")
+            logger.info("="*60)
+    
+    return wrapper
+
+# STEP 3: MODIFY your existing main() function by adding just ONE line:
+@comprehensive_error_logger  # <-- ADD THIS LINE
 def main():
     """Main entry point for the chess AI application"""
+    # KEEP ALL YOUR EXISTING CODE EXACTLY AS IS
     try:
         # Setup the environment
-        device = setup_environment()
+        device = setup_environment()  # <-- This calls YOUR existing function
         
         # Display welcome message
         print("\n" + "="*78)

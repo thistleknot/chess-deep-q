@@ -2,6 +2,7 @@
 - .gitignore
 - board_utils.py
 - chess_ai.py
+- codebase.md
 - constants.py
 - evaluation.py
 - file_structure.txt
@@ -25,7 +26,7 @@
 - Language: unknown
 - Size: 3617 bytes
 - Created: 2025-05-19 18:55:47
-- Modified: 2025-05-19 18:55:47
+- Modified: 2025-05-21 20:37:18
 
 ### Code
 
@@ -211,9 +212,9 @@ cython_debug/
 
 - Extension: .py
 - Language: python
-- Size: 4485 bytes
+- Size: 4472 bytes
 - Created: 2025-05-19 19:22:00
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:12:09
 
 ### Code
 
@@ -259,15 +260,16 @@ def board_to_tensor(board):
     
     return tensor
 
+# Either use lru_cache everywhere OR manual locking, not both
 @lru_cache(maxsize=5000)
 def get_valid_moves_cached(board_fen):
-    """Get valid moves for a board position, using caching for efficiency"""
     board = chess.Board(board_fen)
     return list(board.legal_moves)
 
 def get_move_uci(move):
     """Convert a chess.Move to UCI format string (e.g., 'e2e4')"""
     return move.uci()
+
 def get_legal_moves_from_square(board, square):
     """Get all legal moves from a specific square"""
     moves = set()
@@ -348,9 +350,9 @@ def print_board(board):
 
 - Extension: .py
 - Language: python
-- Size: 36366 bytes
+- Size: 36382 bytes
 - Created: 2025-05-19 19:10:15
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:10:35
 
 ### Code
 
@@ -373,7 +375,8 @@ from tqdm import tqdm
 from neural_network import ChessQNetwork, DQNAgent
 from mcts import ParallelRussianDollMCTS
 from evaluation import fast_evaluate_position, format_score
-from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK
+
+from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK, get_move_uci
 
 # Optimized Chess AI class
 class OptimizedChessAI:
@@ -1240,6 +1243,20 @@ class OptimizedChessAI:
 
 ```
 
+## File: codebase.md
+
+- Extension: .md
+- Language: markdown
+- Size: 0 bytes
+- Created: 2025-05-19 19:59:34
+- Modified: 2025-05-22 18:17:35
+
+### Code
+
+```markdown
+
+```
+
 ## File: constants.py
 
 - Extension: .py
@@ -1288,9 +1305,9 @@ MAX_CACHE_SIZE = 100000  # Limit cache size to avoid memory issues
 
 - Extension: .py
 - Language: python
-- Size: 16692 bytes
+- Size: 16230 bytes
 - Created: 2025-05-19 19:20:50
-- Modified: 2025-05-20 19:10:39
+- Modified: 2025-05-22 17:57:12
 
 ### Code
 
@@ -1366,41 +1383,29 @@ def fast_evaluate_position(board, ignore_checkmate=False):
     black_material = sum(len(board.pieces(piece_type, chess.BLACK)) * value 
                       for piece_type, value in PIECE_VALUES.items())
     material_score = white_material - black_material
-    
+        
     # 2. Mobility - count legal moves and threatened squares
     white_mobility = 0
     black_mobility = 0
-    
-    # Save original turn
-    original_turn = board.turn
-    
-    # Calculate white's mobility
-    if board.turn != chess.WHITE:
-        board.push(chess.Move.null())  # Switch to white's turn
-    white_mobility = len(list(board.legal_moves))
-    
-    # Calculate attacked squares by white
+
+    # Create board copies to calculate mobility for each side
+    white_board = board.copy()
+    white_board.turn = chess.WHITE
+    white_mobility = len(list(white_board.legal_moves))
+
+    black_board = board.copy()
+    black_board.turn = chess.BLACK
+    black_mobility = len(list(black_board.legal_moves))
+
+    # Calculate attacked squares by both sides (no need to change turns)
     white_attacked = set()
+    black_attacked = set()
+
     for square in chess.SQUARES:
         if board.is_attacked_by(chess.WHITE, square):
             white_attacked.add(square)
-    
-    if board.turn != original_turn:
-        board.push(chess.Move.null())  # Restore turn
-    
-    # Calculate black's mobility
-    if board.turn != chess.BLACK:
-        board.push(chess.Move.null())  # Switch to black's turn
-    black_mobility = len(list(board.legal_moves))
-    
-    # Calculate attacked squares by black
-    black_attacked = set()
-    for square in chess.SQUARES:
         if board.is_attacked_by(chess.BLACK, square):
             black_attacked.add(square)
-            
-    if board.turn != original_turn:
-        board.push(chess.Move.null())  # Restore turn
     
     mobility_score = (white_mobility - black_mobility) * 0.1
     control_score = (len(white_attacked) - len(black_attacked)) * 0.05
@@ -1721,27 +1726,21 @@ def calculate_attack_range(board, color):
     
     return attack_squares
 
+# REPLACE the calculate_movement_range function in evaluation.py with this:
+
 def calculate_movement_range(board, color):
     """Calculate all squares a player of given color could move to in one move"""
     movement_squares = set()
     
-    # Save original turn
-    original_turn = board.turn
-    
-    # Set turn to the color we're calculating for
-    if board.turn != color:
-        board.push(chess.Move.null())
+    # Create a board copy and set the turn to the desired color
+    temp_board = board.copy()
+    temp_board.turn = color
     
     # For each legal move, add the destination square
-    for move in board.legal_moves:
+    for move in temp_board.legal_moves:
         movement_squares.add(move.to_square)
     
-    # Restore original turn if needed
-    if original_turn != board.turn:
-        board.push(chess.Move.null())
-    
     return movement_squares
-
 def format_score(score):
     """Format a score properly without special symbols for checkmate"""
     # We'll use a consistent numerical format for all scores
@@ -1843,9 +1842,9 @@ Would you like me to help you implement any of these specific files?
 
 - Extension: .py
 - Language: python
-- Size: 14397 bytes
+- Size: 14600 bytes
 - Created: 2025-05-19 19:41:32
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:58:34
 
 ### Code
 
@@ -1856,10 +1855,10 @@ import os
 import datetime
 import pickle
 import threading
-from board_utils import print_board, get_legal_moves_from_square, square_name_to_square
+from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci
 from evaluation import find_threatened_squares, find_guarded_squares, format_score, fast_evaluate_position
 #from ui import ChessBoardVisualizer, NonClickableChessBoard
-
+import chess.pgn
 
 
 def get_human_move(board):
@@ -1883,6 +1882,7 @@ def get_human_move(board):
         except ValueError:
             print("Invalid format. Use UCI format (e.g., e2e4).")
 
+
 def play_game(ai, human_color=chess.WHITE, display=True):
     """Play a game against the AI"""
     ai.reset_board()
@@ -1896,6 +1896,9 @@ def play_game(ai, human_color=chess.WHITE, display=True):
         if ai.board.turn == human_color:
             # Human's turn
             move = get_human_move(ai.board)
+            if move is None:  # Player resigned
+                print("You resigned. Game over.")
+                return "0-1" if human_color == chess.WHITE else "1-0"
         else:
             # AI's turn
             print("AI is thinking...")
@@ -2292,9 +2295,9 @@ SOFTWARE.
 
 - Extension: .py
 - Language: python
-- Size: 2593 bytes
+- Size: 5777 bytes
 - Created: 2025-05-19 19:26:10
-- Modified: 2025-05-21 06:29:27
+- Modified: 2025-05-22 17:55:25
 
 ### Code
 
@@ -2305,6 +2308,12 @@ import random
 import chess
 import os
 import sys
+
+# ADD THESE MISSING IMPORTS:
+import logging
+import functools
+import traceback
+from datetime import datetime
 
 # Set matplotlib backend BEFORE any other matplotlib imports
 import matplotlib
@@ -2324,6 +2333,13 @@ from menu import main as menu_main
 def setup_environment():
     """Setup the environment for the chess AI"""
     # Check if required packages are installed
+    # Set all random seeds here
+    np.random.seed(42)
+    torch.manual_seed(42)
+    random.seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(42)
+        
     required_packages = ['numpy', 'torch', 'chess', 'matplotlib']
     missing_packages = []
     
@@ -2358,11 +2374,90 @@ def setup_environment():
     
     return device
 
+import traceback
+
+# STEP 2: ADD this decorator function (but keep your existing functions):
+def comprehensive_error_logger(func):
+    """
+    Decorator that sets up comprehensive logging for the entire application.
+    Catches ALL errors that bubble up and logs them to a file.
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Create logs directory if it doesn't exist
+        os.makedirs("logs", exist_ok=True)
+        
+        # Set up logging with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"logs/chess_ai_{timestamp}.log"
+        
+        # Configure logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_filename),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        
+        logger = logging.getLogger(__name__)
+        
+        # Custom exception handler to log uncaught exceptions
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            
+            logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+            print(f"\n{'='*60}")
+            print("CRITICAL ERROR LOGGED!")
+            print(f"Check log file: {log_filename}")
+            print(f"Error: {exc_value}")
+            print(f"{'='*60}")
+        
+        # Set the custom exception handler
+        sys.excepthook = handle_exception
+        
+        # Log startup
+        logger.info("="*60)
+        logger.info("CHESS AI APPLICATION STARTED")
+        logger.info(f"Log file: {log_filename}")
+        logger.info("="*60)
+        
+        try:
+            logger.info("Starting main application function...")
+            result = func(*args, **kwargs)
+            logger.info("Main application function completed successfully")
+            return result
+            
+        except Exception as e:
+            logger.critical(f"Exception in main function: {e}")
+            logger.critical("Full traceback:")
+            logger.critical(traceback.format_exc())
+            
+            print(f"\n{'='*60}")
+            print("MAIN FUNCTION ERROR!")
+            print(f"Error: {e}")
+            print(f"Full details logged to: {log_filename}")
+            print(f"{'='*60}")
+            
+            raise
+            
+        finally:
+            logger.info("Chess AI application session ended")
+            logger.info("="*60)
+    
+    return wrapper
+
+# STEP 3: MODIFY your existing main() function by adding just ONE line:
+@comprehensive_error_logger  # <-- ADD THIS LINE
 def main():
     """Main entry point for the chess AI application"""
+    # KEEP ALL YOUR EXISTING CODE EXACTLY AS IS
     try:
         # Setup the environment
-        device = setup_environment()
+        device = setup_environment()  # <-- This calls YOUR existing function
         
         # Display welcome message
         print("\n" + "="*78)
@@ -2392,9 +2487,9 @@ if __name__ == "__main__":
 
 - Extension: .py
 - Language: python
-- Size: 7223 bytes
+- Size: 9853 bytes
 - Created: 2025-05-19 19:16:29
-- Modified: 2025-05-20 20:10:47
+- Modified: 2025-05-22 18:08:33
 
 ### Code
 
@@ -2411,11 +2506,10 @@ from collections import defaultdict, deque, OrderedDict
 from evaluation import fast_evaluate_position, categorize_moves, select_weighted_moves
 from board_utils import board_to_tensor
 
-# Parallel Russian Doll MCTS implementation
-# Modify ParallelRussianDollMCTS class to incorporate annealing
+# Optimized Parallel Russian Doll MCTS implementation
 class ParallelRussianDollMCTS:
     def __init__(self, board, iterations=20, exploration_weight=1.0, samples_per_level=None, num_workers=None):
-        self.board = board.copy()
+        self.board = board.copy()  # Keep one master copy
         self.iterations = iterations
         self.exploration_weight = exploration_weight
         self.samples_per_level = samples_per_level or [21, 13, 8, 5, 3, 2, 1]
@@ -2429,20 +2523,23 @@ class ParallelRussianDollMCTS:
         self.global_lock = threading.Lock()
         self.total_positions_evaluated = 0
         self._evaluation_lock = threading.Lock()
+        
+        # Pre-compute root state to avoid repeated FEN calls
+        self.root_state = self.board.fen()
     
-    def _select_action(self, state, board, training_progress=0.0, current_move=0, max_moves=200):
+    def _select_action(self, state, training_progress=0.0, current_move=0, max_moves=200):
         """Select the best action from a state using UCB formula with annealing"""
+        # Note: Removed board parameter since we don't use it in selection logic
         with self.node_locks[state]:
             actions = self.children.get(state)
             if not actions:
                 return None
             
             # Apply annealing to UCB exploration parameter
-            # More exploration early in training/games, less later
             alpha = 1 + training_progress  # 1 to 2
             beta = current_move / max_moves if max_moves > 0 else 0.5  # 0 to 1
             
-            # Dynamic exploration weight that decreases with game progress and training progress
+            # Dynamic exploration weight
             effective_exploration = self.exploration_weight * (1.0 - 0.5 * alpha * beta)
             
             # Check for unexplored actions - always prioritize these
@@ -2452,6 +2549,9 @@ class ParallelRussianDollMCTS:
             
             # UCB selection with dynamic exploration parameter
             total_visits = sum(self.N[state][a] for a in actions)
+            if total_visits == 0:
+                return random.choice(actions)
+                
             log_total = math.log(total_visits + 1e-10)
             
             ucb_scores = [
@@ -2461,24 +2561,24 @@ class ParallelRussianDollMCTS:
             ]
             
             return actions[np.argmax(ucb_scores)]
-    
-    def search(self, neural_net=None, device=None, training_progress=0.0, current_move=0, max_moves=200):
-        """Parallel MCTS search with annealing parameters"""
-        state = self.board.fen()
         
+    def search(self, neural_net=None, device=None, training_progress=0.0, current_move=0, max_moves=200):
+        """Parallel MCTS search with simplified board management"""
         # Initialize root if not seen before
         with self.global_lock:
-            if state not in self.children:
-                self._expand_node(state)
+            if self.root_state not in self.children:
+                self._expand_node(self.root_state)
         
-        # Parallel simulations
+        # Parallel simulations - each gets its own board copy
         with ThreadPoolExecutor(max_workers=self.num_workers) as executor:
             futures = []
             for _ in range(self.iterations):
+                # Each simulation gets a fresh copy
                 board_copy = self.board.copy()
+                
                 futures.append(executor.submit(
                     self._parallel_simulation,
-                    board_copy,
+                    board_copy,  # Fresh copy for each simulation
                     neural_net,
                     device,
                     training_progress,
@@ -2488,93 +2588,144 @@ class ParallelRussianDollMCTS:
             
             # Wait for all simulations to complete
             for future in futures:
-                future.result()
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"MCTS simulation error: {e}")
         
-        # Select best move
+        # Select best move based on visit counts
         with self.global_lock:
-            actions = self.children[state]
+            actions = self.children.get(self.root_state, [])
             if not actions:
-                return None
+                # Fallback: return a random legal move
+                legal_moves = list(self.board.legal_moves)
+                return random.choice(legal_moves) if legal_moves else None
             
-            visit_counts = [self.N[state][a] for a in actions]
-            return actions[np.argmax(visit_counts)]
+            visit_counts = [self.N[self.root_state][a] for a in actions]
+            if all(count == 0 for count in visit_counts):
+                # If no actions were visited, return random
+                return random.choice(actions)
             
+            best_action_idx = np.argmax(visit_counts)
+            return actions[best_action_idx]
+
+    # REPLACE the _parallel_simulation method in mcts.py with this SAFER version:
+
     def _parallel_simulation(self, board, neural_net, device, training_progress=0.0, 
                             current_move=0, max_moves=200):
-        """Run a single parallel MCTS simulation with annealing parameters"""
-        states_actions = []
+        """Run a single MCTS simulation with safe board management"""
+        states_actions = []  # Store (state, action) pairs for backpropagation
+        simulation_board = board.copy()  # Work on a copy to avoid issues
         current_depth = 0
         local_move = current_move
         
         # Selection and expansion phase
         while current_depth < len(self.samples_per_level):
-            state = board.fen()
+            state = simulation_board.fen()
             
+            # Expand node if necessary
             with self.global_lock:
                 if state not in self.children:
                     self._expand_node(state)
             
             # Select action with annealing parameters
-            action = self._select_action(state, board, training_progress, local_move, max_moves)
+            action = self._select_action(state, training_progress, local_move, max_moves)
             
             # No actions available or terminal state
-            if not action:
+            if not action or action not in simulation_board.legal_moves:
                 break
             
-            # Execute action and record
-            board.push(action)
+            # Record state-action pair for backpropagation
             states_actions.append((state, action))
-            current_depth += 1
-            local_move += 1  # Increment local move counter
             
-            # Stop if terminal state
-            if board.is_game_over() or current_depth >= len(self.samples_per_level):
+            # Execute action
+            simulation_board.push(action)
+            current_depth += 1
+            local_move += 1
+            
+            # Stop if terminal state or max depth reached
+            if simulation_board.is_game_over() or current_depth >= len(self.samples_per_level):
                 break
         
         # Evaluate final position
-        value = self._evaluate_position(board, neural_net, device)
+        value = self._evaluate_position(simulation_board, neural_net, device)
         
-        # Backpropagation
+        # Backpropagation - update Q values (no need to undo moves since we used a copy)
         for state, action in reversed(states_actions):
             with self.node_locks[state]:
                 self.N[state][action] += 1
-                self.Q[state][action] += (value - self.Q[state][action]) / self.N[state][action]
+                # Running average update
+                old_q = self.Q[state][action]
+                self.Q[state][action] = old_q + (value - old_q) / self.N[state][action]
                 value = -value  # Flip for opponent's perspective
     
     def _expand_node(self, state):
-        """Expand a node in the tree"""
+        """Expand a node in the tree with optimized move generation"""
+        if state in self.children:
+            return  # Already expanded
+            
+        # Create board from state only when necessary
         board = chess.Board(state)
+        
+        # Early termination check
+        if board.is_game_over():
+            self.children[state] = []
+            return
+        
+        # Use optimized move categorization
         categorized_moves, category_weights = categorize_moves(board)
-        level_samples = min(
-            self.samples_per_level[0],
-            sum(len(moves) for moves in categorized_moves.values())
-        )
+        total_available_moves = sum(len(moves) for moves in categorized_moves.values())
+        
+        if total_available_moves == 0:
+            self.children[state] = []
+            return
+        
+        # Determine sample size for this level
+        level_samples = min(self.samples_per_level[0], total_available_moves)
         
         if level_samples > 0:
-            self.children[state] = select_weighted_moves(categorized_moves, category_weights, level_samples)
+            selected_moves = select_weighted_moves(categorized_moves, category_weights, level_samples)
+            self.children[state] = selected_moves
         else:
             self.children[state] = []
     
     def _evaluate_position(self, board, neural_net, device):
-        """Evaluate a board position"""
+        """Evaluate a board position with caching optimization"""
         with self._evaluation_lock:
             self.total_positions_evaluated += 1
+        
+        # Fast terminal position evaluation
+        if board.is_checkmate():
+            return -1.0 if board.turn == chess.WHITE else 1.0
+        
+        if board.is_stalemate() or board.is_insufficient_material():
+            return 0.0
             
-            if board.is_checkmate():
-                return -1.0 if board.turn == chess.WHITE else 1.0
-            
-            if board.is_stalemate() or board.is_insufficient_material() or board.is_repetition(3):
-                return 0.0
-            
-            if neural_net:
+        # Check for threefold repetition (expensive, so do it last)
+        if board.is_repetition(3):
+            return 0.0
+        
+        # Neural network evaluation
+        if neural_net is not None:
+            try:
                 with torch.no_grad():
                     board_tensor = board_to_tensor(board).unsqueeze(0)
-                    if device:
+                    if device is not None:
                         board_tensor = board_tensor.to(device)
-                    return neural_net(board_tensor).item()
-            else:
-                return math.tanh(fast_evaluate_position(board) / 10.0)
-
+                    value = neural_net(board_tensor).item()
+                    # Clamp to reasonable range
+                    return max(-1.0, min(1.0, value))
+            except Exception as e:
+                print(f"Neural network evaluation error: {e}")
+                # Fallback to heuristic evaluation
+        
+        # Fallback to heuristic evaluation
+        try:
+            heuristic_value = fast_evaluate_position(board)
+            return math.tanh(heuristic_value / 10.0)  # Normalize to [-1, 1]
+        except Exception as e:
+            print(f"Heuristic evaluation error: {e}")
+            return 0.0  # Neutral evaluation as last resort
 ```
 
 ## File: menu.py
@@ -2583,7 +2734,7 @@ class ParallelRussianDollMCTS:
 - Language: python
 - Size: 25361 bytes
 - Created: 2025-05-19 19:43:42
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:11:06
 
 ### Code
 
@@ -2645,7 +2796,7 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '2':
             if use_enhanced_features and use_visual_board:
                 # Use the non-clickable board with enhanced features
-                threaded_board = ThreadedChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
+                threaded_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
                 terminal_board.start()
             elif use_visual_board:
                 visual_play_game(chess_ai, human_color=chess.BLACK)
@@ -3109,9 +3260,9 @@ if __name__ == "__main__":
 
 - Extension: .py
 - Language: python
-- Size: 13114 bytes
+- Size: 11229 bytes
 - Created: 2025-05-19 19:19:12
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:18:31
 
 ### Code
 
@@ -3194,18 +3345,77 @@ class DQNAgent:
         """Efficient implementation of 'aha moment' learning"""
         if not is_training or undo_budget <= 0:
             # Regular move selection during gameplay or when out of undos
-            return self.select_move(board, training_progress, is_training=is_training)
+            return self._get_mcts_move(board, training_progress, 0, 200)
         
         # Get current evaluation
         from evaluation import fast_evaluate_position
         current_eval = fast_evaluate_position(board)
         
-        # Standard move selection (call the regular MCTS logic directly to avoid recursion)
-        # For gameplay (not training), always use MCTS with no exploration
-        if not is_training:
-            training_progress = 1.0  # Force minimum exploration
-            current_move = 200  # Force minimum exploration
+        # Get the initial move from MCTS
+        initial_move = self._get_mcts_move(board, training_progress, 0, 200)
         
+        # Quick look-ahead to check if this move is a mistake
+        test_board = board.copy()
+        test_board.push(initial_move)
+        new_eval = fast_evaluate_position(test_board)
+        
+        # Calculate evaluation change from current player's perspective
+        eval_change = (current_eval - new_eval) if board.turn == chess.WHITE else (new_eval - current_eval)
+        
+        # If not a significant mistake, return the original move
+        if eval_change >= eval_threshold:  # eval_threshold is negative (e.g., -1.5)
+            return initial_move
+        
+        # At this point, we've detected a significant mistake
+        print(f"AHA! Detected potential mistake (eval drop: {eval_change:.2f})")
+        
+        # Step 1: Create immediate learning signal
+        from board_utils import board_to_tensor
+        state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
+        
+        # Perform direct Q-value update (immediate negative feedback)
+        self.optimizer.zero_grad()
+        q_value = self.q_network(state_tensor)
+        target_q = torch.tensor([-1.0], device=self.device)  # Strong negative reward
+        loss = F.mse_loss(q_value, target_q)
+        loss.backward()
+        self.optimizer.step()
+        
+        # Step 2: Find a better alternative move
+        better_moves = []
+        for alt_move in board.legal_moves:
+            if alt_move.uci() == initial_move.uci():
+                continue  # Skip the mistake move
+                
+            # Quick evaluation of alternative
+            alt_board = board.copy()
+            alt_board.push(alt_move)
+            alt_eval = fast_evaluate_position(alt_board)
+            
+            # Calculate evaluation change from current player's perspective
+            alt_eval_change = (current_eval - alt_eval) if board.turn == chess.WHITE else (alt_eval - current_eval)
+            
+            # If this move is better than our threshold (less negative)
+            if alt_eval_change >= eval_threshold:
+                better_moves.append((alt_move, alt_eval_change))
+        
+        # If no better moves found, return original despite the mistake
+        if not better_moves:
+            print("No better alternatives found, keeping original move")
+            return initial_move
+        
+        # Sort by evaluation change (best first) and pick the best
+        better_moves.sort(key=lambda x: x[1], reverse=True)
+        best_alternative = better_moves[0][0]
+        
+        # Decrement the budget since we used an AHA moment
+        self.aha_budget_remaining -= 1
+        print(f"AHA moment used! Corrected {initial_move.uci()} → {best_alternative.uci()}. Remaining budget: {self.aha_budget_remaining}")
+        
+        return best_alternative
+    
+    def _get_mcts_move(self, board, training_progress, current_move, max_moves):
+        """Extract MCTS move selection into separate method to avoid code duplication"""
         # Adjust MCTS iterations and parameters based on training progress
         base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
         exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
@@ -3231,77 +3441,13 @@ class DQNAgent:
             num_workers=self.num_cpu_cores
         )
         
-        move = mcts.search(
+        return mcts.search(
             neural_net=self.q_network, 
             device=self.device,
             training_progress=training_progress,
-            current_move=0,
-            max_moves=200
+            current_move=current_move,
+            max_moves=max_moves
         )
-        
-        # Quick look-ahead to check if this move is a mistake
-        test_board = board.copy()
-        test_board.push(move)
-        new_eval = fast_evaluate_position(test_board)
-        
-        # Calculate evaluation change from player's perspective
-        eval_change = current_eval - new_eval if board.turn == chess.WHITE else new_eval - current_eval
-        
-        # If not a significant mistake, just return the original move
-        if eval_change >= eval_threshold:
-            return move
-        
-        # At this point, we've detected a significant mistake
-        print(f"AHA! Detected potential mistake (eval change: {eval_change:.2f})")
-        
-        # Step 1: Create immediate learning signal (most important part)
-        from board_utils import board_to_tensor
-        state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            # Get target value (immediate negative reward)
-            target_q = -1.0  # Strong negative reward for mistake
-        
-        # Perform direct Q-value update (bypassing replay buffer for efficiency)
-        self.optimizer.zero_grad()
-        q_value = self.q_network(state_tensor)
-        loss = F.mse_loss(q_value, torch.tensor([target_q], device=self.device))
-        loss.backward()
-        self.optimizer.step()
-        
-        # Step 2: Find a better alternative move
-        better_moves = []
-        for alt_move in board.legal_moves:
-            if alt_move.uci() == move.uci():
-                continue  # Skip the mistake move
-                
-            # Quick evaluation of alternative
-            alt_board = board.copy()
-            alt_board.push(alt_move)
-            alt_eval = fast_evaluate_position(alt_board)
-            
-            # From player's perspective
-            relevant_eval = current_eval - alt_eval if board.turn == chess.WHITE else alt_eval - current_eval
-            
-            # If this move is better than our threshold
-            if relevant_eval > eval_threshold:
-                better_moves.append((alt_move, relevant_eval))
-        
-        # If no better moves, return original despite the mistake
-        if not better_moves:
-            print("No better alternatives found, keeping original move")
-            return move
-        
-        # Sort by evaluation (best first) and pick the best
-        better_moves.sort(key=lambda x: x[1], reverse=True)
-        better_move = better_moves[0][0]
-        
-        # Decrement the budget since we used an AHA moment
-        self.aha_budget_remaining -= 1
-        print(f"AHA moment used! Corrected {move.uci()} → {better_move.uci()}. Remaining budget: {self.aha_budget_remaining}")
-        
-        # Return the better move
-        return better_move
 
     def update_target_network(self):
         """Copy weights from the Q-network to the target network"""
@@ -3312,60 +3458,21 @@ class DQNAgent:
         state = board_to_tensor(board).unsqueeze(0).to(self.device)
         with torch.no_grad():
             return self.q_network(state).item()
-                
+
     def select_move(self, board, training_progress=0.0, is_training=False, current_move=0, max_moves=200):
-        """
-        Select a move using Russian Doll MCTS with neural network guidance
-        Optionally uses AHA learning for mistake correction during training
-        """
         # Use AHA learning if enabled, during training, and budget available
         if (hasattr(self, 'use_aha_learning') and self.use_aha_learning and 
             is_training and hasattr(self, 'aha_budget_remaining') and 
-            self.aha_budget_remaining > 0 and current_move > 5):  # Don't trigger in opening
+            self.aha_budget_remaining > 0 and current_move > 5):
             
             return self.select_move_with_aha_learning(
                 board, training_progress, is_training, 
                 self.aha_budget_remaining, self.aha_threshold
             )
         
-        # Regular MCTS move selection (existing logic)
-        # For gameplay (not training), always use MCTS with no exploration
-        if not is_training:
-            training_progress = 1.0  # Force minimum exploration
-            current_move = max_moves  # Force minimum exploration
-        
-        # Adjust MCTS iterations and parameters based on training progress
-        base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
-        exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
-        
-        # Adjust sampling width at each level based on training progress
-        samples_per_level = [
-            max(21, int(25 * (1 - 0.3 * training_progress))),  # Level 1
-            max(13, int(15 * (1 - 0.3 * training_progress))),  # Level 2
-            max(8, int(10 * (1 - 0.3 * training_progress))),   # Level 3
-            max(5, int(7 * (1 - 0.3 * training_progress))),    # Level 4
-            max(3, int(5 * (1 - 0.3 * training_progress))),    # Level 5
-            max(2, int(3 * (1 - 0.3 * training_progress))),    # Level 6
-            max(1, int(2 * (1 - 0.3 * training_progress)))     # Level 7
-        ]
-        
-        # Use parallel MCTS with annealing parameters
-        mcts = ParallelRussianDollMCTS(
-            board, 
-            iterations=base_iterations,
-            exploration_weight=exploration_weight,
-            samples_per_level=samples_per_level,
-            num_workers=self.num_cpu_cores
-        )
-        
-        return mcts.search(
-            neural_net=self.q_network, 
-            device=self.device,
-            training_progress=training_progress,
-            current_move=current_move,
-            max_moves=max_moves
-        )
-        
+        # Regular MCTS move selection
+        return self._get_mcts_move(board, training_progress, current_move, max_moves)                
+
     # In OptimizedChessAI class
     def get_best_move(self, training_progress=0.0, is_training=False):
         """Get the best move for the current position"""
@@ -3419,21 +3526,20 @@ class DQNAgent:
 
 - Extension: .md
 - Language: markdown
-- Size: 7894 bytes
-- Created: 2025-05-21 20:33:03
-- Modified: 2025-05-21 20:33:29
+- Size: 11839 bytes
+- Created: 2025-05-22 06:57:33
+- Modified: 2025-05-22 18:17:05
 
 ### Code
 
 ```markdown
-# Chess Deep-Q Learning AI 🏆
+# Chess AI with Deep Q-Learning & Russian Doll MCTS 🏰
 
-A sophisticated chess AI powered by Deep Q-Learning and Russian Doll Monte Carlo Tree Search (MCTS), featuring an innovative **AHA Learning** system for real-time mistake correction during training.
+*A chess AI that learns from its mistakes and thinks in narrowing circles*
 
 ## 🎯 Quick Start
 
 ```bash
-# Python 3.10 required
 python main.py
 ```
 
@@ -3441,9 +3547,17 @@ python main.py
 
 ### Enhanced Terminal Chess Interface
 
-| Version 1.0 | Version 1.1 |
-|--------------|-------------|
-| ![Chess v1.0](images/chess-v1.0.png) | ![Chess v1.1](images/chess-v1.1.png) |
+Releases
+
+1.0 Initial Release with kitten caboodle
+1.1 Aha learning disabled by default
+1.2 Better color matching
+1.3 Bug fixes with Claude 4
+
+Current Version
+| Version 1.3 |
+|--------------|
+| ![Chess v1.3](images/chess-v1.3.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
@@ -3454,221 +3568,302 @@ python main.py
 - 🟦 **Guarded Squares** - Cyan background
 - 🟨 **Contested Squares** - Yellow (both threatened + guarded)
 
-## ✨ Core Features
+## ✨ What Makes This Different
 
-### 🧠 AHA Learning System (NEW!)
-- **Mistake Detection**: AI recognizes evaluation drops > 1.5 points during training
-- **Real-time Correction**: Immediate Q-network updates when mistakes detected
-- **Budget System**: Limited to 3 corrections per game to prevent overuse
-- **Configurable**: Toggle on/off and adjust thresholds via menu
+### 🧠 AHA Learning - Learning from Mistakes in Real Time
+Your AI doesn't just make moves and hope for the best. When it detects a significant evaluation drop (configurable threshold), it can:
+- Immediately update its neural network with the mistake
+- Search for a better alternative 
+- Self-correct during training (limited budget per game)
 
-### 🎮 Enhanced Gameplay
-- **Smart Input**: Type coordinates like `e2` to see all possible moves highlighted
-- **Real-time Highlighting**: Instant visual feedback as you type
-- **Move Hints**: Get AI suggestions with `hint` command
-- **Undo System**: Take back moves with `undo` command
-- **Save/Load**: Persist games in PGN format
+### 🎯 Russian Doll MCTS - Smart Search Narrowing
+Instead of exploring moves randomly, the search progressively narrows:
+```
+21 promising moves → 13 best → 8 better → 5 good → 3 solid → 2 strong → 1 choice
+```
+Each level is weighted by tactical significance (captures, checks, threats, development).
 
-### 🚀 Advanced AI Architecture
-- **Russian Doll MCTS**: Narrowing search (21→13→8→5→3→2→1 moves per level)
-- **Parallel Processing**: Multi-threaded search with automatic CPU detection
-- **Neural Network**: CNN-based position evaluation with CUDA support
-- **Smart Evaluation**: Material, mobility, king safety, pawn structure, space control
-
-### 📊 Training & Analysis
-- **Fast Training**: 20 games in ~30 minutes with CUDA
-- **Progress Tracking**: Real-time plots of evaluation during games
-- **Performance Analysis**: Win/loss statistics and training curves
-- **ELO Evaluation**: Play against Stockfish to determine strength
+### 🖼️ Enhanced Terminal Interface
+- **Real-time highlighting** as you type coordinates
+- **Color-coded threats** (red) and protection (cyan)
+- **Move possibilities** shown instantly when selecting pieces
+- **Score tracking** with live evaluation updates
+- **Secondary moves** highlighting 2-move sequences
 
 ## 🏗️ Architecture
 
+```
+Russian Doll MCTS + Deep Q-Network
+         ↓
+Weighted Move Sampling by Chess Logic
+         ↓  
+Parallel Tree Search (Multi-core)
+         ↓
+CNN Position Evaluation + Game Experience
+```
+
 ### Core Components
+- **chess_ai.py**: Main AI orchestration with training loops
+- **neural_network.py**: CNN-based Q-network with AHA learning
+- **mcts.py**: Russian Doll MCTS with progressive narrowing
+- **evaluation.py**: Chess position scoring (material, mobility, safety, structure)
+- **terminal_board.py**: Rich terminal interface with real-time highlighting
 
-```
-main.py → menu.py → {OptimizedChessAI, TerminalChessBoard}
-                 ↓
-              chess_ai.py (DQNAgent + MCTS)
-                 ↓
-         neural_network.py + mcts.py
-                 ↓
-         evaluation.py + board_utils.py
-```
+## 🎮 Features
 
-### File Structure
+### Training
+- **Self-play learning** with experience replay
+- **Real-time plotting** of evaluation during games
+- **Continuing training** from saved models
+- **AHA Learning** for mistake correction (configurable)
+- **Progress tracking** with loss curves and game statistics
 
-| Module | Purpose |
-|--------|---------|
-| **constants.py** | Game constants, piece values, UI colors |
-| **board_utils.py** | Board representation, move utilities, caching |
-| **evaluation.py** | Position evaluation, move categorization |
-| **mcts.py** | Russian Doll MCTS implementation |
-| **neural_network.py** | CNN architecture, DQN agent |
-| **chess_ai.py** | Main AI class, training loops, analysis |
-| **terminal_board.py** | Enhanced ASCII chess interface |
-| **menu.py** | User interface and navigation |
-| **main.py** | Entry point and setup |
+### Playing
+- **Interactive terminal** with coordinate input and visual feedback
+- **Move hints** from the AI's current policy
+- **Undo system** for taking back moves
+- **Save/load games** in PGN format
+- **Real-time evaluation** display
+
+### Analysis
+- **Training progress plots** showing learning curves
+- **Game evaluation tracking** across all training games
+- **ELO estimation** by playing against Stockfish
+- **Performance metrics** and statistical analysis
+
+## 🔧 Technical Details
+
+### Search Algorithm
+- **Russian Doll MCTS**: 7 levels of progressive narrowing
+- **Weighted sampling**: Moves categorized by tactical importance
+- **Parallel processing**: Multi-threaded search using available CPU cores
+- **Annealing**: Search parameters adjust based on training progress
+
+### Neural Network
+- **CNN Architecture**: 12-channel input (piece positions) → Conv2D layers → Value output
+- **Deep Q-Learning**: Experience replay with target network updates
+- **CUDA Support**: Automatic GPU acceleration when available
+- **AHA Learning**: Real-time mistake correction during training
+
+### Position Evaluation
+Comprehensive scoring based on:
+- **Material balance** (piece values)
+- **Mobility** (legal moves and attacked squares)
+- **King safety** (attacks, castling, central exposure)
+- **Pawn structure** (doubled, isolated, chains)
+- **Space control** (center and extended center)
+- **Piece coordination** (defended pieces, development)
 
 ## 🎯 Usage Examples
 
 ### Basic Training
 ```python
-# Train a new model
 chess_ai = OptimizedChessAI(training_games=20, verbose=True)
 chess_ai.train()
-
-# Save the trained model
-chess_ai.save_model("my_chess_model.pth")
+chess_ai.save_model("my_model.pth")
 ```
 
 ### Enable AHA Learning
 ```python
-# Train with mistake correction
 chess_ai = OptimizedChessAI(
     training_games=50, 
-    verbose=True, 
     use_aha_learning=True
 )
 chess_ai.train()
 ```
 
-### Interactive Play
-```bash
-# Start the game
-python main.py
-
-# Menu options:
-# 1. Play against AI (as white/black)
-# 2. Train new models
-# 3. Load existing models
-# 4. Analyze performance
-# 5. Configure AHA Learning
+### Continue Training
+```python
+chess_ai.load_model("existing_model.pth", continue_training=True)
+chess_ai.training_games += 30  # Train 30 more games
+chess_ai.train()
 ```
 
-### Terminal Commands During Play
+## 🎮 Playing the Game
+
+### Terminal Commands
 ```bash
-e2      # Select piece at e2
+e2      # Select piece at e2 (highlights possible moves)
 e4      # Move to e4
 e2e4    # Complete move notation
-hint    # Get move suggestion
-undo    # Take back last move
+hint    # Get AI's suggested move
+undo    # Take back your last move
 save    # Save current game
 resign  # Resign the game
 ```
 
-## 🔧 Technical Specifications
+### Visual Interface
+- 🟡 **Selected piece** highlighted in yellow
+- 🟢 **Possible moves** in green
+- 🟣 **Secondary moves** (2-move sequences) in magenta  
+- 🔵 **Last move** highlighted in blue
+- 🔴 **Threatened squares** in red
+- 🟦 **Guarded squares** in cyan
 
-### AI Architecture
-- **Search Algorithm**: Russian Doll MCTS with progressive narrowing
-- **Neural Network**: Convolutional layers (12→32→64 channels) + fully connected
-- **Training**: Deep Q-Learning with experience replay
-- **Evaluation**: Multi-factor position assessment (material, mobility, safety, structure)
+## 📊 Training Features
 
-### Performance
-- **Training Speed**: ~1.5 games/minute (CUDA), ~3-4 games/minute (CPU)
-- **Search Depth**: 7 levels with adaptive sampling (21→13→8→5→3→2→1)
-- **Memory Usage**: ~10K position cache, configurable replay buffer
-- **Parallel Processing**: Automatic CPU core detection and utilization
+### Real-time Monitoring
+- **Live evaluation plots** during each game
+- **Score progression** for both players
+- **Training metrics** (loss, epsilon, game length)
+- **Final position analysis** across all games
 
-### AHA Learning Innovation
-```
-Move Selection → Evaluation Drop Detected → Q-Network Update → Alternative Search → Better Move
-      ↓                    ↓                      ↓                    ↓              ↓
-   Standard MCTS    Threshold: -1.5pts    Immediate Learning    Masked Previous    Budget--
-```
+### Analysis Tools
+- **Performance curves** showing learning progress
+- **Material exchange tracking** 
+- **Game outcome statistics**
+- **ELO rating estimation** via Stockfish play
 
-## 📈 Training Features
-
-### Progress Monitoring
-- **Real-time Evaluation**: Track position scores during games
-- **Training Curves**: Loss, epsilon, game length over time
-- **Final Score Analysis**: Win/loss/draw distribution
-- **Performance Metrics**: Average game length, evaluation trends
-
-### Advanced Options
-- **Continuing Training**: Load existing models and train further
-- **Custom Positions**: Set up specific board positions (FEN notation)
-- **Verbose Mode**: Detailed logging and plotting
-- **Model Persistence**: Save/load complete training state
-
-## 🎮 Game Modes
-
-### Single Player
-- **vs AI**: Play against trained models
-- **Analysis Mode**: Get move explanations and hints
-- **Training Mode**: Watch AI improve in real-time
-
-### AI vs AI
-- **Self-Play**: Watch AI play against itself
-- **Model Comparison**: Compare different trained models
-- **Strength Testing**: Evaluate against Stockfish
-
-## 🔮 Future Enhancements
-
-### High Priority
-- **Position-Adaptive Evaluation**: Dynamic weights based on position type
-- **Phase-Specific Analysis**: Opening/middlegame/endgame specialization
-- **Enhanced MCTS**: GPU acceleration and batched processing
-
-### Advanced Features
-- **Pattern Recognition**: Common chess motifs and themes
-- **Curriculum Learning**: Progressive difficulty training
-- **Interactive Analysis**: Move explanation and position breakdown
-
-### User Experience
-- **GUI Interface**: Modern graphical chess board
-- **Strength Levels**: Configurable playing difficulty
-- **Coach Mode**: Teaching features and move explanations
-
-## 🛠️ Installation Requirements
+## 🛠️ Requirements
 
 ```bash
-# Core dependencies
 pip install torch numpy chess matplotlib colorama tqdm
-
-# Optional for ELO evaluation
-# Install Stockfish chess engine separately
 ```
 
-### System Requirements
-- **Python**: 3.10+
-- **GPU**: CUDA-compatible (optional, for faster training)
-- **RAM**: 4GB minimum, 8GB recommended
-- **CPU**: Multi-core recommended for parallel MCTS
+### Optional
+- **Stockfish** chess engine (for ELO evaluation)
+- **CUDA** compatible GPU (for faster training)
 
-## 📊 Performance Benchmarks
+## 🚀 Innovation Highlights
 
-| Configuration | Training Speed | Search Depth | Strength Est. |
-|---------------|---------------|--------------|---------------|
-| CPU Only      | 3-4 games/min | 7 levels     | ~1200-1400 ELO |
-| CUDA GPU      | 8-10 games/min| 7 levels     | ~1400-1600 ELO |
-| AHA Learning  | +20% learning | Same         | +100-200 ELO |
+### AHA Learning System
+A novel approach where the AI can recognize mistakes during training:
+```
+Move → Evaluation Drop Detected → Neural Network Update → Better Alternative → Improved Policy
+```
 
-## 🤝 Contributing
+### Russian Doll MCTS  
+Efficient tree search that concentrates computation on promising moves:
+```
+Categorical Move Weighting → Progressive Sampling → Narrowing Focus → Best Move Selection
+```
 
-This project implements cutting-edge AI techniques for chess. Key innovation areas:
-- **AHA Learning**: Novel mistake correction during training
-- **Russian Doll MCTS**: Efficient tree search with progressive narrowing
-- **Multi-modal Interface**: Both terminal and future GUI support
+### Enhanced User Experience
+Real-time visual feedback system that makes chess analysis intuitive and educational.
+
+## 🔮 Future Features & Development Roadmap
+
+### Strategic Evaluation Enhancements
+
+**1. Position-Adaptive Evaluation Weights**
+- Implement dynamic evaluation weights that adjust based on position characteristics (e.g., open/closed position, material imbalance)
+- Add a position classifier that can recognize key position types and modify evaluation parameters accordingly
+
+**2. Strategic Pattern Recognition**
+- Implement detection of common chess patterns (e.g., bishops of opposite colors, IQP positions, minority attacks)
+- Add evaluation terms for important strategic themes (e.g., piece quality, color complex weaknesses, compensation for material)
+- Create a database of strategic patterns with corresponding evaluation adjustments
+
+**3. Phase-Specific Evaluation**
+- Develop separate evaluation functions for opening, middlegame, and endgame
+- Implement phase detection to smoothly transition between evaluation functions
+- Apply different piece values and positional weights based on game phase
+- Integrate specialized endgame evaluations (e.g., king activity becomes more important)
+
+### Search and Learning Improvements
+
+**4. Enhanced MCTS Implementation**
+- Replace Python threads with multiprocessing for true parallel search
+- Implement batched MCTS with vectorized operations for GPU acceleration
+- Add progressive move widening to dynamically adjust search breadth based on position complexity
+- Implement threat detection and extension for horizon effect mitigation
+
+**5. Advanced Reinforcement Learning**
+- Replace basic Q-learning with TD(λ) or other temporal difference methods with eligibility traces
+- Implement prioritized experience replay with importance sampling
+- Add curriculum learning progression (start with endgames, advance to middlegames and openings)
+- Develop a more nuanced reward function that captures practical winning chances
+
+**6. Hybrid Learning Approach**
+- Add supervised learning pre-training using a database of master games
+- Implement self-play with expert iteration to combine MCTS and neural guidance
+- Create a validation system using classic chess puzzles to test tactical understanding
+
+### Technical Optimizations
+
+**7. Neural Network Architecture Refactoring**
+- Replace the current CNN with a more modern architecture using residual connections
+- Reduce fully-connected layer size using 1×1 convolutions to maintain spatial information
+- Add batch normalization for faster training convergence
+- Implement optional model quantization for inference acceleration
+
+**8. Memory Management Enhancements**
+- Replace dictionary cache with a proper LRU cache implementation
+- Implement Zobrist hashing for efficient position representation
+- Add prefetch functionality for likely next positions
+- Implement incremental evaluation updates to avoid full recalculation
+
+**9. Optimized Batch Processing**
+- Standardize batch processing throughout the system
+- Reduce device transfer overhead with larger, less frequent transfers
+- Create a dedicated GPU evaluation pipeline for position batches
+- Add adaptive batch sizing based on hardware capabilities
+
+**10. Performance Profiling Framework**
+- Add comprehensive performance profiling capabilities
+- Implement logging of training metrics, search statistics, and system resource usage
+- Create a benchmarking system for comparing versions and configurations
+- Add A/B testing capability for evaluating system changes
+
+### User Experience Enhancements
+
+**11. Improved Game Analysis**
+- Add visualization of the AI's "thought process" during move selection
+- Implement move explanation that describes strategic and tactical considerations
+- Create position evaluation breakdowns showing contribution of different factors
+- Add a feature to analyze user games with commentaries
+
+**12. Training Management Interface**
+- Develop a dashboard for monitoring training progress with key metrics
+- Add checkpointing and resumable training with configurable parameters
+- Implement automatic hyperparameter tuning
+- Create visualization of neural network learning progress
+
+**13. Adaptable Playing Strength**
+- Add configurable playing strength levels that go beyond simple search depth adjustment
+- Implement personality profiles with different strategic preferences
+- Create a progressive learning mode that adapts to the user's skill level
+- Add coaching features that suggest alternative moves and explain mistakes
+
+### Implementation Priorities
+
+**🔥 High Priority:**
+- Position-adaptive evaluation weights (#1)
+- Phase-specific evaluation (#3)
+- Enhanced MCTS implementation (#4)
+- Neural network architecture refactoring (#7)
+- Memory management enhancements (#8)
+
+**⚡ Medium Priority:**
+- Strategic pattern recognition (#2)
+- Advanced reinforcement learning (#5)
+- Optimized batch processing (#9)
+- Performance profiling framework (#10)
+- Improved game analysis (#11)
+
+**📋 Lower Priority:**
+- Hybrid learning approach (#6)
+- Training management interface (#12)
+- Adaptable playing strength (#13)
+
+*These requirements aim to significantly improve both the chess understanding and computational efficiency of the system while maintaining a balance between immediate practical improvements and longer-term architectural enhancements.*
 
 ## 📄 License
 
-MIT License - Feel free to use and modify for educational and research purposes.
+MIT License - Built for chess enthusiasts and AI researchers.
 
 ---
 
-**Built with ❤️ for chess enthusiasts and AI researchers**
-
-*"The best way to learn chess is to play against an opponent that learns from its mistakes faster than you do."*
+**"In chess, as in learning, the best move often comes after recognizing the worst one."**
 ```
 
 ## File: terminal_board.py
 
 - Extension: .py
 - Language: python
-- Size: 21845 bytes
+- Size: 21719 bytes
 - Created: 2025-05-21 06:54:45
-- Modified: 2025-05-21 20:02:22
+- Modified: 2025-05-22 17:44:11
 
 ### Code
 
@@ -3679,7 +3874,7 @@ import os
 import time
 from colorama import Fore, Back, Style
 from evaluation import fast_evaluate_position, find_threatened_squares, find_guarded_squares
-from board_utils import get_legal_moves_from_square, get_secondary_moves
+from board_utils import get_legal_moves_from_square, get_secondary_moves, get_move_uci
 
 # Initialize colorama for cross-platform terminal colors
 colorama.init()
@@ -3741,18 +3936,16 @@ class TerminalChessBoard:
                 # Priority-based highlighting (most important first)
                 if self.selected_square == square:
                     bg_color = Back.YELLOW
+                elif square in contested_squares:
+                    bg_color = Back.LIGHTYELLOW_EX
+                elif square in threatened_squares:
+                    bg_color = Back.RED
                 elif square in self.possible_moves:
                     bg_color = Back.GREEN
                 elif square in self.secondary_moves:
                     bg_color = Back.MAGENTA
                 elif self.last_move and (square == self.last_move.from_square or square == self.last_move.to_square):
                     bg_color = Back.BLUE
-                elif square in contested_squares:
-                    # Contested squares: both threatened and guarded
-                    # Use a distinctive color - yellow for contested
-                    bg_color = Back.LIGHTYELLOW_EX
-                elif square in threatened_squares:
-                    bg_color = Back.RED
                 elif square in guarded_squares:
                     bg_color = Back.CYAN
                 
@@ -4185,9 +4378,9 @@ class TerminalChessBoard:
 
 - Extension: .py
 - Language: python
-- Size: 28483 bytes
+- Size: 28485 bytes
 - Created: 2025-05-19 19:42:41
-- Modified: 2025-05-21 06:28:42
+- Modified: 2025-05-22 17:13:33
 
 ### Code
 
@@ -4209,7 +4402,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 # At the beginning of your ui.py file
 import matplotlib
-matplotlib.use('Agg')  # Use the Agg backend which doesn't require tkinter
+matplotlib.use('TkAgg')  # Use the Agg backend which doesn't require tkinter
 import threading
 import queue
 import time

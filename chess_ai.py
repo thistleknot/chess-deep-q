@@ -16,7 +16,8 @@ from tqdm import tqdm
 from neural_network import ChessQNetwork, DQNAgent
 from mcts import ParallelRussianDollMCTS
 from evaluation import fast_evaluate_position, format_score
-from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK
+
+from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK, get_move_uci
 
 # Optimized Chess AI class
 class OptimizedChessAI:

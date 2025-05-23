@@ -76,18 +76,77 @@ class DQNAgent:
         """Efficient implementation of 'aha moment' learning"""
         if not is_training or undo_budget <= 0:
             # Regular move selection during gameplay or when out of undos
-            return self.select_move(board, training_progress, is_training=is_training)
+            return self._get_mcts_move(board, training_progress, 0, 200)
         
         # Get current evaluation
         from evaluation import fast_evaluate_position
         current_eval = fast_evaluate_position(board)
         
-        # Standard move selection (call the regular MCTS logic directly to avoid recursion)
-        # For gameplay (not training), always use MCTS with no exploration
-        if not is_training:
-            training_progress = 1.0  # Force minimum exploration
-            current_move = 200  # Force minimum exploration
+        # Get the initial move from MCTS
+        initial_move = self._get_mcts_move(board, training_progress, 0, 200)
         
+        # Quick look-ahead to check if this move is a mistake
+        test_board = board.copy()
+        test_board.push(initial_move)
+        new_eval = fast_evaluate_position(test_board)
+        
+        # Calculate evaluation change from current player's perspective
+        eval_change = (current_eval - new_eval) if board.turn == chess.WHITE else (new_eval - current_eval)
+        
+        # If not a significant mistake, return the original move
+        if eval_change >= eval_threshold:  # eval_threshold is negative (e.g., -1.5)
+            return initial_move
+        
+        # At this point, we've detected a significant mistake
+        print(f"AHA! Detected potential mistake (eval drop: {eval_change:.2f})")
+        
+        # Step 1: Create immediate learning signal
+        from board_utils import board_to_tensor
+        state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
+        
+        # Perform direct Q-value update (immediate negative feedback)
+        self.optimizer.zero_grad()
+        q_value = self.q_network(state_tensor)
+        target_q = torch.tensor([-1.0], device=self.device)  # Strong negative reward
+        loss = F.mse_loss(q_value, target_q)
+        loss.backward()
+        self.optimizer.step()
+        
+        # Step 2: Find a better alternative move
+        better_moves = []
+        for alt_move in board.legal_moves:
+            if alt_move.uci() == initial_move.uci():
+                continue  # Skip the mistake move
+                
+            # Quick evaluation of alternative
+            alt_board = board.copy()
+            alt_board.push(alt_move)
+            alt_eval = fast_evaluate_position(alt_board)
+            
+            # Calculate evaluation change from current player's perspective
+            alt_eval_change = (current_eval - alt_eval) if board.turn == chess.WHITE else (alt_eval - current_eval)
+            
+            # If this move is better than our threshold (less negative)
+            if alt_eval_change >= eval_threshold:
+                better_moves.append((alt_move, alt_eval_change))
+        
+        # If no better moves found, return original despite the mistake
+        if not better_moves:
+            print("No better alternatives found, keeping original move")
+            return initial_move
+        
+        # Sort by evaluation change (best first) and pick the best
+        better_moves.sort(key=lambda x: x[1], reverse=True)
+        best_alternative = better_moves[0][0]
+        
+        # Decrement the budget since we used an AHA moment
+        self.aha_budget_remaining -= 1
+        print(f"AHA moment used! Corrected {initial_move.uci()} → {best_alternative.uci()}. Remaining budget: {self.aha_budget_remaining}")
+        
+        return best_alternative
+    
+    def _get_mcts_move(self, board, training_progress, current_move, max_moves):
+        """Extract MCTS move selection into separate method to avoid code duplication"""
         # Adjust MCTS iterations and parameters based on training progress
         base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
         exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
@@ -113,77 +172,13 @@ class DQNAgent:
             num_workers=self.num_cpu_cores
         )
         
-        move = mcts.search(
+        return mcts.search(
             neural_net=self.q_network, 
             device=self.device,
             training_progress=training_progress,
-            current_move=0,
-            max_moves=200
+            current_move=current_move,
+            max_moves=max_moves
         )
-        
-        # Quick look-ahead to check if this move is a mistake
-        test_board = board.copy()
-        test_board.push(move)
-        new_eval = fast_evaluate_position(test_board)
-        
-        # Calculate evaluation change from player's perspective
-        eval_change = current_eval - new_eval if board.turn == chess.WHITE else new_eval - current_eval
-        
-        # If not a significant mistake, just return the original move
-        if eval_change >= eval_threshold:
-            return move
-        
-        # At this point, we've detected a significant mistake
-        print(f"AHA! Detected potential mistake (eval change: {eval_change:.2f})")
-        
-        # Step 1: Create immediate learning signal (most important part)
-        from board_utils import board_to_tensor
-        state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            # Get target value (immediate negative reward)
-            target_q = -1.0  # Strong negative reward for mistake
-        
-        # Perform direct Q-value update (bypassing replay buffer for efficiency)
-        self.optimizer.zero_grad()
-        q_value = self.q_network(state_tensor)
-        loss = F.mse_loss(q_value, torch.tensor([target_q], device=self.device))
-        loss.backward()
-        self.optimizer.step()
-        
-        # Step 2: Find a better alternative move
-        better_moves = []
-        for alt_move in board.legal_moves:
-            if alt_move.uci() == move.uci():
-                continue  # Skip the mistake move
-                
-            # Quick evaluation of alternative
-            alt_board = board.copy()
-            alt_board.push(alt_move)
-            alt_eval = fast_evaluate_position(alt_board)
-            
-            # From player's perspective
-            relevant_eval = current_eval - alt_eval if board.turn == chess.WHITE else alt_eval - current_eval
-            
-            # If this move is better than our threshold
-            if relevant_eval > eval_threshold:
-                better_moves.append((alt_move, relevant_eval))
-        
-        # If no better moves, return original despite the mistake
-        if not better_moves:
-            print("No better alternatives found, keeping original move")
-            return move
-        
-        # Sort by evaluation (best first) and pick the best
-        better_moves.sort(key=lambda x: x[1], reverse=True)
-        better_move = better_moves[0][0]
-        
-        # Decrement the budget since we used an AHA moment
-        self.aha_budget_remaining -= 1
-        print(f"AHA moment used! Corrected {move.uci()} → {better_move.uci()}. Remaining budget: {self.aha_budget_remaining}")
-        
-        # Return the better move
-        return better_move
 
     def update_target_network(self):
         """Copy weights from the Q-network to the target network"""
@@ -194,60 +189,21 @@ class DQNAgent:
         state = board_to_tensor(board).unsqueeze(0).to(self.device)
         with torch.no_grad():
             return self.q_network(state).item()
-                
+
     def select_move(self, board, training_progress=0.0, is_training=False, current_move=0, max_moves=200):
-        """
-        Select a move using Russian Doll MCTS with neural network guidance
-        Optionally uses AHA learning for mistake correction during training
-        """
         # Use AHA learning if enabled, during training, and budget available
         if (hasattr(self, 'use_aha_learning') and self.use_aha_learning and 
             is_training and hasattr(self, 'aha_budget_remaining') and 
-            self.aha_budget_remaining > 0 and current_move > 5):  # Don't trigger in opening
+            self.aha_budget_remaining > 0 and current_move > 5):
             
             return self.select_move_with_aha_learning(
                 board, training_progress, is_training, 
                 self.aha_budget_remaining, self.aha_threshold
             )
         
-        # Regular MCTS move selection (existing logic)
-        # For gameplay (not training), always use MCTS with no exploration
-        if not is_training:
-            training_progress = 1.0  # Force minimum exploration
-            current_move = max_moves  # Force minimum exploration
-        
-        # Adjust MCTS iterations and parameters based on training progress
-        base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
-        exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
-        
-        # Adjust sampling width at each level based on training progress
-        samples_per_level = [
-            max(21, int(25 * (1 - 0.3 * training_progress))),  # Level 1
-            max(13, int(15 * (1 - 0.3 * training_progress))),  # Level 2
-            max(8, int(10 * (1 - 0.3 * training_progress))),   # Level 3
-            max(5, int(7 * (1 - 0.3 * training_progress))),    # Level 4
-            max(3, int(5 * (1 - 0.3 * training_progress))),    # Level 5
-            max(2, int(3 * (1 - 0.3 * training_progress))),    # Level 6
-            max(1, int(2 * (1 - 0.3 * training_progress)))     # Level 7
-        ]
-        
-        # Use parallel MCTS with annealing parameters
-        mcts = ParallelRussianDollMCTS(
-            board, 
-            iterations=base_iterations,
-            exploration_weight=exploration_weight,
-            samples_per_level=samples_per_level,
-            num_workers=self.num_cpu_cores
-        )
-        
-        return mcts.search(
-            neural_net=self.q_network, 
-            device=self.device,
-            training_progress=training_progress,
-            current_move=current_move,
-            max_moves=max_moves
-        )
-        
+        # Regular MCTS move selection
+        return self._get_mcts_move(board, training_progress, current_move, max_moves)                
+
     # In OptimizedChessAI class
     def get_best_move(self, training_progress=0.0, is_training=False):
         """Get the best move for the current position"""

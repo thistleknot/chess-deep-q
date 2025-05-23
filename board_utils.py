@@ -39,15 +39,16 @@ def board_to_tensor(board):
     
     return tensor
 
+# Either use lru_cache everywhere OR manual locking, not both
 @lru_cache(maxsize=5000)
 def get_valid_moves_cached(board_fen):
-    """Get valid moves for a board position, using caching for efficiency"""
     board = chess.Board(board_fen)
     return list(board.legal_moves)
 
 def get_move_uci(move):
     """Convert a chess.Move to UCI format string (e.g., 'e2e4')"""
     return move.uci()
+
 def get_legal_moves_from_square(board, square):
     """Get all legal moves from a specific square"""
     moves = set()
