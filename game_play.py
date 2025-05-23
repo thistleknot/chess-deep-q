@@ -4,10 +4,10 @@ import os
 import datetime
 import pickle
 import threading
-from board_utils import print_board, get_legal_moves_from_square, square_name_to_square
+from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci
 from evaluation import find_threatened_squares, find_guarded_squares, format_score, fast_evaluate_position
 #from ui import ChessBoardVisualizer, NonClickableChessBoard
-
+import chess.pgn
 
 
 def get_human_move(board):
@@ -31,6 +31,7 @@ def get_human_move(board):
         except ValueError:
             print("Invalid format. Use UCI format (e.g., e2e4).")
 
+
 def play_game(ai, human_color=chess.WHITE, display=True):
     """Play a game against the AI"""
     ai.reset_board()
@@ -44,6 +45,9 @@ def play_game(ai, human_color=chess.WHITE, display=True):
         if ai.board.turn == human_color:
             # Human's turn
             move = get_human_move(ai.board)
+            if move is None:  # Player resigned
+                print("You resigned. Game over.")
+                return "0-1" if human_color == chess.WHITE else "1-0"
         else:
             # AI's turn
             print("AI is thinking...")

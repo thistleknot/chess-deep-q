@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 # At the beginning of your ui.py file
 import matplotlib
-matplotlib.use('Agg')  # Use the Agg backend which doesn't require tkinter
+matplotlib.use('TkAgg')  # Use the Agg backend which doesn't require tkinter
 import threading
 import queue
 import time
