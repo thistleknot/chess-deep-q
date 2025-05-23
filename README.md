@@ -23,6 +23,10 @@ Current Version
 | Version 1.3 |
 |--------------|
 | ![Chess v1.3](images/chess-v1.3.png) |
+=======
+| Version 1.0 | Version 1.1 |
+|--------------|-------------|
+| ![Chess v1.0](images/chess-v1.0.png) | ![Chess v1.1](images/chess-v1.1.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
