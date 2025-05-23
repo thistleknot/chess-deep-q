@@ -300,86 +300,82 @@ class NonClickableChessBoard:
             self.last_move = move
             self.move_history.append(move.uci())
             self.update_board()
-    
+        
     def undo_move(self):
-        """Undo the last move pair (human + AI)"""
+        """Undo the last move pair (human + AI) with improved state management"""
         # Need at least one move to undo
         if len(self.move_history) == 0:
             print("No moves to undo.")
             return False
-            
-        # If it's the human's turn, we need to undo the last AI move and the human move before that
+        
+        # Determine how many moves to undo based on whose turn it is
         if self.board.turn == self.human_color:
-            # Make sure we have at least two moves to undo (human and AI)
+            # It's human's turn, so AI just moved
+            # We want to undo both the AI's move and the human's move before that
             if len(self.move_history) >= 2:
-                # Undo the last AI move and the human move before that
-                self.move_history.pop()  # Remove AI move
-                self.move_history.pop()  # Remove human move
-                
-                # Load the board state from before the human's move
-                if len(self.board_history) >= 2:
-                    self.board_history.pop()  # Current state
-                    self.board_history.pop()  # AI's move state
-                    self.board = self.board_history[-1].copy()
-                else:
-                    # Fallback if history is missing
-                    self.board = chess.Board()
-                    for move_uci in self.move_history:
-                        self.board.push(chess.Move.from_uci(move_uci))
-                
-                # Set last move if there are any moves left
-                if self.move_history:
-                    self.last_move = chess.Move.from_uci(self.move_history[-1])
-                else:
-                    self.last_move = None
-                
-                print("Undid last move pair.")
-                
-                # Reset selection state
-                self.selected_square = None
-                self.possible_moves = set()
-                self.secondary_moves = set()
-                
-                # Update the AI's board
-                self.ai.board = self.board.copy()
-                
-                self.update_board()
-                return True
+                moves_to_undo = 2
             else:
-                print("Not enough moves to undo.")
+                print("Not enough moves to undo a complete turn pair.")
                 return False
-        # If it's the AI's turn, we just need to undo the human's last move
         else:
-            # Pop the last move
-            self.move_history.pop()
-            
-            # Load previous board state
-            if len(self.board_history) >= 1:
-                self.board = self.board_history.pop().copy()
-            else:
-                # Fallback if history is missing
-                self.board = chess.Board()
-                for move_uci in self.move_history:
-                    self.board.push(chess.Move.from_uci(move_uci))
-            
-            # Set last move if there are any moves left
+            # It's AI's turn, so human just moved
+            # We only want to undo the human's move
+            moves_to_undo = 1
+        
+        # Remove the moves from history
+        for _ in range(moves_to_undo):
             if self.move_history:
-                self.last_move = chess.Move.from_uci(self.move_history[-1])
-            else:
-                self.last_move = None
-            
+                self.move_history.pop()
+        
+        # Reconstruct the board from the beginning with remaining moves
+        self.board = chess.Board()  # Start fresh
+        
+        # Replay all remaining moves
+        for move_uci in self.move_history:
+            try:
+                move = chess.Move.from_uci(move_uci)
+                self.board.push(move)
+            except ValueError:
+                print(f"Error replaying move: {move_uci}")
+                # Fallback: reset to initial position
+                self.board = chess.Board()
+                self.move_history = []
+                break
+        
+        # Rebuild board history to match current state
+        self.board_history = [chess.Board()]  # Start with initial position
+        temp_board = chess.Board()
+        for move_uci in self.move_history:
+            move = chess.Move.from_uci(move_uci)
+            temp_board.push(move)
+            self.board_history.append(temp_board.copy())
+        
+        # Set last move if there are any moves left
+        if self.move_history:
+            self.last_move = chess.Move.from_uci(self.move_history[-1])
+        else:
+            self.last_move = None
+        
+        # Reset selection state
+        self.selected_square = None
+        self.possible_moves = set()
+        self.secondary_moves = set()
+        self.move_hint = None
+        self.highlighted_hint = None
+        
+        # Update the AI's board to match current state
+        self.ai.board = self.board.copy()
+        
+        # For ui.py ONLY: Update the visual board display
+        self.update_board()
+        
+        # Provide feedback
+        if moves_to_undo == 2:
+            print("Undid last move pair (human + AI).")
+        else:
             print("Undid last move.")
-            
-            # Reset selection state
-            self.selected_square = None
-            self.possible_moves = set()
-            self.secondary_moves = set()
-            
-            # Update the AI's board
-            self.ai.board = self.board.copy()
-            
-            self.update_board()
-            return True
+        
+        return True
     
     def show_move_hint(self):
         """Get a hint for the best move from the AI (optional feature)"""
