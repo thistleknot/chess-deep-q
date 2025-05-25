@@ -25,7 +25,86 @@ class TerminalChessBoard:
     def clear_screen(self):
         """Clear the terminal screen"""
         os.system('cls' if os.name == 'nt' else 'clear')
+    def prompt_load_game(self):
+        """Prompt the user to select a saved game"""
+        # Import the list_saved_games function if not already imported
+        from game_play import list_saved_games, load_game_from_pgn
         
+        games = list_saved_games()
+        if not games:
+            print("No saved games found.")
+            return
+            
+        print("Available saved games:")
+        for i, game in enumerate(games):
+            print(f"{i+1}. {game}")
+            
+        try:
+            choice = int(input("Enter the number of the game to load (0 to cancel): "))
+            if 1 <= choice <= len(games):
+                self.load_game(games[choice-1])
+                return True
+            elif choice == 0:
+                return False
+            else:
+                print("Invalid choice.")
+                return False
+        except ValueError:
+            print("Invalid choice. Load cancelled.")
+            return False
+
+    def load_game(self, filename="game.pgn"):
+        """Load a saved game"""
+        # Import the load_game_from_pgn function if not already imported
+        from game_play import load_game_from_pgn
+        
+        board, moves = load_game_from_pgn(filename)
+        if board and moves:
+            self.board = board
+            self.move_history = moves
+            
+            # Reconstruct board history
+            self.board_history = [chess.Board()]
+            temp_board = chess.Board()
+            for move_uci in moves:
+                move = chess.Move.from_uci(move_uci)
+                temp_board.push(move)
+                self.board_history.append(temp_board.copy())
+            
+            # Set last move if available
+            if moves:
+                last_move_uci = moves[-1]
+                self.last_move = chess.Move.from_uci(last_move_uci)
+            else:
+                self.last_move = None
+                
+            self.selected_square = None
+            self.possible_moves = set()
+            self.secondary_moves = set()
+            
+            # Update the AI's board
+            self.ai.board = board.copy()
+            
+            self.clear_screen()
+            self.display_board()
+            print(f"Game loaded from {filename}")
+            return True
+        else:
+            print(f"Failed to load game from {filename}")
+            return False
+
+    def save_game(self, filename=None):
+        """Save the current game"""
+        # Import the save_game_to_pgn function if not already imported
+        from game_play import save_game_to_pgn
+        
+        if not filename:
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename = f"chess_game_{timestamp}.pgn"
+        
+        path = save_game_to_pgn(self.board, self.move_history, filename)
+        print(f"Game saved to {path}")
+        return path
     def display_board(self):
         """Display the chess board with colored squares and pieces"""
         # Get evaluation score
