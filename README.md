@@ -1,28 +1,32 @@
 # Chess AI with Deep Q-Learning & Russian Doll MCTS 🏰
-
 *A chess AI that learns from its mistakes and thinks in narrowing circles*
 
 ## 🎯 Quick Start
-
 ```bash
 python main.py
 ```
+
+### First Time Setup
+1. The AI will automatically create `models/` and `training_plots/` directories
+2. Pre-trained models should be placed in the `models/` directory
+3. Training plots are saved to `training_plots/` (no interactive plots during training)
 
 ## 🖼️ Interface Demo
 
 ### Enhanced Terminal Chess Interface
 
-Releases
+## Release History
+- **1.4** 🆕 Improved model management, fixed training issues, non-interactive training plots
+- **1.3** Bug fixes with Claude Opus 4
+- **1.2** Better color matching for terminal display
+- **1.1** AHA learning disabled by default
+- **1.0** Initial Release with full feature set
 
-1.0 Initial Release with kitten caboodle
-1.1 Aha learning disabled by default
-1.2 Better color matching
-1.3 Bug fixes with Claude 4
+### Current Version
 
-Current Version
-| Version 1.3 |
+| Version 1.4 |
 |--------------|
-| ![Chess v1.3](images/chess-v1.3.png) |
+| ![Chess v1.4](images/chess-v1.3.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
@@ -33,13 +37,40 @@ Current Version
 - 🟦 **Guarded Squares** - Cyan background
 - 🟨 **Contested Squares** - Yellow (both threatened + guarded)
 
+## 🆕 Version 1.4 Improvements
+
+### Model Management
+- Models now default to `models/` directory
+- Automatic path detection when loading models
+- Clear prompts when default models are found
+
+### Training Enhancements
+- Training plots automatically saved to `training_plots/` directory
+- No more interactive matplotlib windows during training
+- Latest game always saved as `latest_game_progression.png`
+- Summary plots generated after training completion
+
+### Bug Fixes
+- Fixed `chess` module import errors in neural network
+- Resolved tensor shape mismatch warnings
+- Fixed matplotlib/tkinter threading issues
+- Corrected variable name errors in menu system
+- Suppressed matplotlib debug logging
+
+### AHA Learning Changes
+- Now **disabled by default** (opt-in feature)
+- Must be explicitly enabled during training setup
+- Clear status display in menu
+
 ## ✨ What Makes This Different
 
-### 🧠 AHA Learning - Learning from Mistakes in Real Time
-Your AI doesn't just make moves and hope for the best. When it detects a significant evaluation drop (configurable threshold), it can:
+### 🧠 AHA Learning - Learning from Mistakes in Real Time (Optional)
+When enabled, the AI can detect significant evaluation drops and:
 - Immediately update its neural network with the mistake
 - Search for a better alternative 
 - Self-correct during training (limited budget per game)
+
+**Note**: AHA Learning is OFF by default. Enable it in the training menu if desired.
 
 ### 🎯 Russian Doll MCTS - Smart Search Narrowing
 Instead of exploring moves randomly, the search progressively narrows:
@@ -56,7 +87,6 @@ Each level is weighted by tactical significance (captures, checks, threats, deve
 - **Secondary moves** highlighting 2-move sequences
 
 ## 🏗️ Architecture
-
 ```
 Russian Doll MCTS + Deep Q-Network
          ↓
@@ -69,7 +99,7 @@ CNN Position Evaluation + Game Experience
 
 ### Core Components
 - **chess_ai.py**: Main AI orchestration with training loops
-- **neural_network.py**: CNN-based Q-network with AHA learning
+- **neural_network.py**: CNN-based Q-network with optional AHA learning
 - **mcts.py**: Russian Doll MCTS with progressive narrowing
 - **evaluation.py**: Chess position scoring (material, mobility, safety, structure)
 - **terminal_board.py**: Rich terminal interface with real-time highlighting
@@ -78,9 +108,9 @@ CNN Position Evaluation + Game Experience
 
 ### Training
 - **Self-play learning** with experience replay
-- **Real-time plotting** of evaluation during games
+- **Training plots saved to disk** (no interactive windows)
 - **Continuing training** from saved models
-- **AHA Learning** for mistake correction (configurable)
+- **AHA Learning** for mistake correction (optional, off by default)
 - **Progress tracking** with loss curves and game statistics
 
 ### Playing
@@ -91,12 +121,22 @@ CNN Position Evaluation + Game Experience
 - **Real-time evaluation** display
 
 ### Analysis
-- **Training progress plots** showing learning curves
+- **Training progress plots** saved to `training_plots/`
 - **Game evaluation tracking** across all training games
 - **ELO estimation** by playing against Stockfish
 - **Performance metrics** and statistical analysis
 
 ## 🔧 Technical Details
+
+### File Organization
+```
+chess-deep-q/
+├── models/              # Saved model files (.pth)
+├── training_plots/      # Training visualization plots
+├── saved_games/         # Saved games in PGN format
+├── logs/               # Application logs
+└── *.py                # Source code files
+```
 
 ### Search Algorithm
 - **Russian Doll MCTS**: 7 levels of progressive narrowing
@@ -108,7 +148,7 @@ CNN Position Evaluation + Game Experience
 - **CNN Architecture**: 12-channel input (piece positions) → Conv2D layers → Value output
 - **Deep Q-Learning**: Experience replay with target network updates
 - **CUDA Support**: Automatic GPU acceleration when available
-- **AHA Learning**: Real-time mistake correction during training
+- **AHA Learning**: Real-time mistake correction during training (optional)
 
 ### Position Evaluation
 Comprehensive scoring based on:
@@ -121,25 +161,25 @@ Comprehensive scoring based on:
 
 ## 🎯 Usage Examples
 
-### Basic Training
+### Basic Training (AHA Learning OFF by default)
 ```python
 chess_ai = OptimizedChessAI(training_games=20, verbose=True)
 chess_ai.train()
-chess_ai.save_model("my_model.pth")
+chess_ai.save_model("my_model.pth")  # Saves to models/my_model.pth
 ```
 
 ### Enable AHA Learning
 ```python
 chess_ai = OptimizedChessAI(
     training_games=50, 
-    use_aha_learning=True
+    use_aha_learning=True  # Must explicitly enable
 )
 chess_ai.train()
 ```
 
 ### Continue Training
 ```python
-chess_ai.load_model("existing_model.pth", continue_training=True)
+chess_ai.load_model("chess_model.pth", continue_training=True)  # Loads from models/
 chess_ai.training_games += 30  # Train 30 more games
 chess_ai.train()
 ```
@@ -154,7 +194,9 @@ e2e4    # Complete move notation
 hint    # Get AI's suggested move
 undo    # Take back your last move
 save    # Save current game
+load    # Load a saved game
 resign  # Resign the game
+cancel  # Cancel piece selection
 ```
 
 ### Visual Interface
@@ -167,11 +209,18 @@ resign  # Resign the game
 
 ## 📊 Training Features
 
-### Real-time Monitoring
-- **Live evaluation plots** during each game
-- **Score progression** for both players
-- **Training metrics** (loss, epsilon, game length)
-- **Final position analysis** across all games
+### Non-Interactive Training
+- **Plots saved automatically** to `training_plots/`
+- **No matplotlib windows** during training (prevents GUI issues)
+- **Latest game plot** always available as `latest_game_progression.png`
+- **Summary plots** generated after training completion
+
+### Saved Training Plots
+1. `latest_game_progression.png` - Most recent game's score progression
+2. `evaluation_trends.png` - Final evaluation across all games
+3. `training_progress.png` - Loss, epsilon, evaluation, and move counts
+4. `final_game_scores.png` - Bar chart of final scores
+5. `move_counts.png` - Moves per game trend
 
 ### Analysis Tools
 - **Performance curves** showing learning progress
@@ -180,18 +229,31 @@ resign  # Resign the game
 - **ELO rating estimation** via Stockfish play
 
 ## 🛠️ Requirements
-
 ```bash
-pip install torch numpy chess matplotlib colorama tqdm
+pip install torch numpy chess matplotlib colorama tqdm scipy pandas
 ```
 
 ### Optional
-- **Stockfish** chess engine (for ELO evaluation)
+- **Stockfish** chess engine (for ELO evaluation only)
 - **CUDA** compatible GPU (for faster training)
+
+## 🐛 Known Issues & Solutions
+
+### Issue: "chess module not defined"
+**Solution**: Fixed in v1.4 - ensure you're using the latest version
+
+### Issue: Matplotlib GUI errors during training
+**Solution**: Fixed in v1.4 - plots now save to disk instead of displaying
+
+### Issue: Can't find model files
+**Solution**: Models are now saved/loaded from `models/` directory by default
+
+### Issue: Too many debug logs
+**Solution**: Matplotlib debug logging suppressed in v1.4
 
 ## 🚀 Innovation Highlights
 
-### AHA Learning System
+### AHA Learning System (Optional)
 A novel approach where the AI can recognize mistakes during training:
 ```
 Move → Evaluation Drop Detected → Neural Network Update → Better Alternative → Improved Policy
@@ -314,9 +376,7 @@ Real-time visual feedback system that makes chess analysis intuitive and educati
 *These requirements aim to significantly improve both the chess understanding and computational efficiency of the system while maintaining a balance between immediate practical improvements and longer-term architectural enhancements.*
 
 ## 📄 License
-
 MIT License - Built for chess enthusiasts and AI researchers.
 
 ---
-
 **"In chess, as in learning, the best move often comes after recognizing the worst one."**

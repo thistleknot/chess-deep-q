@@ -351,9 +351,9 @@ def print_board(board):
 
 - Extension: .py
 - Language: python
-- Size: 36382 bytes
+- Size: 44672 bytes
 - Created: 2025-05-19 19:10:15
-- Modified: 2025-05-22 17:10:35
+- Modified: 2025-05-28 17:14:37
 
 ### Code
 
@@ -473,7 +473,8 @@ class OptimizedChessAI:
         plt.tight_layout()
         plt.show()
 
-    # 2. Modify the self_play_game method to display scores and track them for plotting
+    # 1. First, let's fix the self_play_game method in chess_ai.py to save plots instead of showing them:
+
     def self_play_game(self, max_moves=200):
         """Play a game against itself and store the transitions for learning"""
         self.reset_board()
@@ -494,7 +495,7 @@ class OptimizedChessAI:
         # Calculate training progress (0 to 1)
         training_progress = min(len(self.game_history) / self.training_games, 1.0)
         
-        # Display setup - but don't create the plot yet
+        # Display setup
         if self.verbose:
             print(f"\rGame {len(self.game_history)+1}: Move 0/{max_moves}", end="", flush=True)
         
@@ -553,7 +554,6 @@ class OptimizedChessAI:
         
         # Store game result and evaluation
         result = self.board.result()
-        # At the end of the game
         final_evaluation = fast_evaluate_position(self.board)
         
         # Display final scores properly
@@ -579,13 +579,17 @@ class OptimizedChessAI:
         self.epsilon_history.append(self.dqn_agent.epsilon)
         self.move_count_history.append(move_count)
         
-        # Display final scores
-        if self.verbose:
-            black_score_str = format_score(-final_evaluation)
-            print(f"\nFinal scores - White: {white_score_str} | Black: {black_score_str}")
-            print(f"Result: {result}, Moves: {move_count}")
+        # SAVE the game progress plot to disk instead of showing it
+        if self.verbose and len(white_scores) > 0:
+            # Create training_plots directory if it doesn't exist
+            plot_dir = "training_plots"
+            os.makedirs(plot_dir, exist_ok=True)
             
-            # Plot the game progress AFTER completion
+            # Use non-interactive backend for this plot
+            import matplotlib
+            current_backend = matplotlib.get_backend()
+            matplotlib.use('Agg')  # Switch to non-interactive backend
+            
             plt.figure(figsize=(10, 6))
             move_numbers = list(range(1, len(white_scores) + 1))
             plt.plot(move_numbers, white_scores, 'b-', label="White")
@@ -597,7 +601,21 @@ class OptimizedChessAI:
             plt.grid(True)
             plt.legend()
             plt.tight_layout()
-            plt.show()
+            
+            # Save to disk (overwriting is fine)
+            plot_filename = os.path.join(plot_dir, "latest_game_progression.png")
+            plt.savefig(plot_filename, dpi=150)
+            plt.close()  # Important: close the figure to free memory
+            
+            # Also save with game number for history if desired
+            numbered_filename = os.path.join(plot_dir, f"game_{len(self.game_history):04d}_progression.png")
+            plt.savefig(plot_filename)  # Save as latest
+            
+            # Restore original backend
+            matplotlib.use(current_backend)
+            
+            if self.verbose:
+                print(f"Game plot saved to {plot_filename}")
         
         # Periodically update the target network
         if len(self.game_history) % 5 == 0:
@@ -701,8 +719,9 @@ class OptimizedChessAI:
         print(f"Training data saved to {filename}")
         
         return df
-    
-    # 4. Finally, let's modify the train method to automatically show plots at the end of training
+        
+    # 3. Update the train method in chess_ai.py to save summary plots instead of showing them:
+
     def train(self, progress_interval=1):
         """Train the AI through self-play with optimized performance"""
         print(f"Training for {self.training_games} games...")
@@ -753,24 +772,159 @@ class OptimizedChessAI:
         print(f"Total training time: {total_time:.2f}s")
         print(f"Average time per game: {total_time / self.training_games:.2f}s")
         
-        # Automatically show training summary plots without user interaction
-        print("\nGenerating training summary plots...")
+        # Save training summary plots to disk
+        print("\nSaving training summary plots...")
         
-        # Show evaluation trends across all games
-        self.plot_evaluation_trends_across_games()
+        # Create directory for plots
+        plot_dir = "training_plots"
+        os.makedirs(plot_dir, exist_ok=True)
         
-        # Show other training metrics
-        self.plot_training_progress()
-        self.plot_final_game_scores()
-        self.plot_move_counts()
+        # Save all the summary plots
+        self._save_training_plots(plot_dir)
         
-        # Save training data to CSV
+        print(f"Training plots saved to {plot_dir}/")
+        
+        # Ask if user wants to save training data to CSV
         save_csv = input("Save training data to CSV? (y/n, default: n): ").lower() or 'n'
         if save_csv == 'y':
             filename = input("Enter CSV filename (default: training_data.csv): ") or "training_data.csv"
             self.save_training_data_to_csv(filename)
         
         return
+
+    def _save_training_plots(self, plot_dir):
+        """Save all training plots to disk"""
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
+        
+        # 1. Save evaluation trends across all games
+        if self.game_history:
+            plt.figure(figsize=(12, 6))
+            game_numbers = list(range(1, len(self.game_history) + 1))
+            final_evals = [game['final_score'] for game in self.game_history]
+            
+            plt.plot(game_numbers, final_evals, 'b-', marker='o', linewidth=2)
+            plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+            
+            # Color code by game result
+            results = [game['result'] for game in self.game_history]
+            for i, result in enumerate(results):
+                if result == '1-0':  # White win
+                    plt.plot(game_numbers[i], final_evals[i], 'bo', markersize=8)
+                elif result == '0-1':  # Black win
+                    plt.plot(game_numbers[i], final_evals[i], 'ro', markersize=8)
+                else:  # Draw
+                    plt.plot(game_numbers[i], final_evals[i], 'go', markersize=8)
+            
+            plt.title('Final Position Evaluation Across Training Games')
+            plt.xlabel('Game Number')
+            plt.ylabel('Evaluation (+ favors White, - favors Black)')
+            plt.grid(True, alpha=0.3)
+            
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor='blue', label='White Win'),
+                Patch(facecolor='red', label='Black Win'),
+                Patch(facecolor='green', label='Draw')
+            ]
+            plt.legend(handles=legend_elements)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plot_dir, 'evaluation_trends.png'), dpi=150)
+            plt.close()
+        
+        # 2. Save training progress metrics
+        if self.loss_history or self.evaluation_history:
+            plt.figure(figsize=(15, 10))
+            
+            # Plot loss history
+            if self.loss_history:
+                plt.subplot(2, 2, 1)
+                plt.plot(self.loss_history)
+                plt.title('Q-Network Loss')
+                plt.xlabel('Training Steps')
+                plt.ylabel('Loss')
+                plt.grid(True, alpha=0.3)
+            
+            # Plot evaluation history
+            if self.evaluation_history:
+                plt.subplot(2, 2, 2)
+                plt.plot(self.evaluation_history)
+                plt.title('Board Evaluation')
+                plt.xlabel('Games')
+                plt.ylabel('Evaluation Score')
+                plt.grid(True, alpha=0.3)
+            
+            # Plot epsilon history
+            if self.epsilon_history:
+                plt.subplot(2, 2, 3)
+                plt.plot(self.epsilon_history)
+                plt.title('Exploration Rate (Epsilon)')
+                plt.xlabel('Games')
+                plt.ylabel('Epsilon')
+                plt.grid(True, alpha=0.3)
+            
+            # Plot move count history
+            if self.move_count_history:
+                plt.subplot(2, 2, 4)
+                plt.plot(self.move_count_history)
+                plt.title('Moves per Game')
+                plt.xlabel('Games')
+                plt.ylabel('Move Count')
+                plt.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(plot_dir, 'training_progress.png'), dpi=150)
+            plt.close()
+        
+        # 3. Save final game scores bar chart
+        if self.game_history:
+            plt.figure(figsize=(12, 8))
+            
+            game_numbers = list(range(1, len(self.game_history) + 1))
+            final_scores = [game['final_score'] for game in self.game_history]
+            results = [game['result'] for game in self.game_history]
+            
+            colors = []
+            for result in results:
+                if result == '1-0':  # White win
+                    colors.append('blue')
+                elif result == '0-1':  # Black win
+                    colors.append('red')
+                else:  # Draw or unfinished
+                    colors.append('green')
+            
+            plt.bar(game_numbers, final_scores, color=colors)
+            plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+            
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor='blue', label='White Win'),
+                Patch(facecolor='red', label='Black Win'),
+                Patch(facecolor='green', label='Draw')
+            ]
+            plt.legend(handles=legend_elements)
+            
+            plt.xlabel('Game Number')
+            plt.ylabel('Final Score')
+            plt.title('Final Scores Across All Training Games')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plot_dir, 'final_game_scores.png'), dpi=150)
+            plt.close()
+        
+        # 4. Save move counts plot
+        if self.move_count_history:
+            plt.figure(figsize=(10, 6))
+            plt.plot(range(1, len(self.move_count_history) + 1), self.move_count_history, 'o-')
+            plt.title('Moves per Game')
+            plt.xlabel('Game Number')
+            plt.ylabel('Number of Moves')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(plot_dir, 'move_counts.png'), dpi=150)
+            plt.close()
+        
+        print(f"Saved plots: evaluation_trends.png, training_progress.png, final_game_scores.png, move_counts.png")
     
     def plot_training_progress(self):
         """Plot the training progress"""
@@ -810,9 +964,18 @@ class OptimizedChessAI:
         
         plt.tight_layout()
         plt.show()
-    
+        
+    # 2. Update save_model and load_model in chess_ai.py to use models/ directory by default:
+
     def save_model(self, filename='chess_ai_model.pth'):
         """Save the Q-network model and training state"""
+        # Ensure models directory exists
+        os.makedirs('models', exist_ok=True)
+        
+        # Add models directory to path if not already specified
+        if not os.path.dirname(filename):
+            filename = os.path.join('models', filename)
+            
         torch.save({
             'q_network_state_dict': self.dqn_agent.q_network.state_dict(),
             'target_network_state_dict': self.dqn_agent.target_q_network.state_dict(),
@@ -827,7 +990,8 @@ class OptimizedChessAI:
             'training_games': self.training_games,
             'save_timestamp': time.time()
         }, filename)
-    
+        print(f"Model saved to {filename}")
+
     def load_model(self, filename='chess_ai_model.pth', continue_training=False):
         """
         Load the Q-network model and optionally training state
@@ -836,15 +1000,38 @@ class OptimizedChessAI:
             filename: Path to the saved model file
             continue_training: If True, also load training history and state
         """
-        """Load the Q-network model"""
+        # If no directory specified, check models directory first
+        if not os.path.dirname(filename):
+            models_path = os.path.join('models', filename)
+            if os.path.exists(models_path):
+                filename = models_path
+            elif not os.path.exists(filename):
+                # If not found in current dir either, use models path for better error message
+                filename = models_path
+        
         checkpoint = torch.load(filename)
         self.dqn_agent.q_network.load_state_dict(checkpoint['q_network_state_dict'])
         self.dqn_agent.target_q_network.load_state_dict(checkpoint['target_network_state_dict'])
         self.dqn_agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.dqn_agent.epsilon = checkpoint['epsilon']
+        
+        # Optionally load training history
+        if continue_training:
+            if 'game_history' in checkpoint:
+                self.game_history = checkpoint['game_history']
+            if 'evaluation_history' in checkpoint:
+                self.evaluation_history = checkpoint['evaluation_history']
+            if 'loss_history' in checkpoint:
+                self.loss_history = checkpoint['loss_history']
+            if 'epsilon_history' in checkpoint:
+                self.epsilon_history = checkpoint['epsilon_history']
+            if 'move_count_history' in checkpoint:
+                self.move_count_history = checkpoint['move_count_history']
+            if 'total_games_trained' in checkpoint:
+                print(f"Loaded model trained on {checkpoint['total_games_trained']} games")
+        
         print(f"Model loaded from {filename}")
-
-
+    
     def evaluate_elo_rating(self, num_games=20, starting_elo=1500, step_size=100, min_elo=800, max_elo=3000):
         """
         Evaluate the ELO rating of the model by playing against Stockfish at different levels.
@@ -1250,7 +1437,7 @@ class OptimizedChessAI:
 - Language: markdown
 - Size: 0 bytes
 - Created: 2025-05-23 22:55:16
-- Modified: 2025-05-25 07:35:11
+- Modified: 2025-05-28 17:28:08
 
 ### Code
 
@@ -1843,9 +2030,9 @@ Would you like me to help you implement any of these specific files?
 
 - Extension: .py
 - Language: python
-- Size: 14600 bytes
+- Size: 14719 bytes
 - Created: 2025-05-19 19:41:32
-- Modified: 2025-05-22 17:58:34
+- Modified: 2025-05-28 16:54:26
 
 ### Code
 
@@ -1856,9 +2043,11 @@ import os
 import datetime
 import pickle
 import threading
-from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci
+import matplotlib.pyplot as plt  # Add this import
+from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci, get_secondary_moves
 from evaluation import find_threatened_squares, find_guarded_squares, format_score, fast_evaluate_position
-#from ui import ChessBoardVisualizer, NonClickableChessBoard
+from ui import create_visual_chess_board  # Add this import
+# Remove duplicate imports and unused imports
 import chess.pgn
 
 
@@ -2296,9 +2485,9 @@ SOFTWARE.
 
 - Extension: .py
 - Language: python
-- Size: 5777 bytes
+- Size: 6525 bytes
 - Created: 2025-05-19 19:26:10
-- Modified: 2025-05-22 17:55:25
+- Modified: 2025-05-28 17:27:18
 
 ### Code
 
@@ -2309,16 +2498,19 @@ import random
 import chess
 import os
 import sys
-
-# ADD THESE MISSING IMPORTS:
 import logging
 import functools
 import traceback
 from datetime import datetime
 
+# IMPORTANT: Suppress matplotlib debug logging
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
 # Set matplotlib backend BEFORE any other matplotlib imports
 import matplotlib
-matplotlib.use('TkAgg')  # Force TkAgg backend which is interactive
+matplotlib.use('Agg')  # Use non-interactive backend for training
+import matplotlib.pyplot as plt
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -2378,6 +2570,8 @@ def setup_environment():
 import traceback
 
 # STEP 2: ADD this decorator function (but keep your existing functions):
+# In main.py, in the comprehensive_error_logger function, update the logging configuration:
+
 def comprehensive_error_logger(func):
     """
     Decorator that sets up comprehensive logging for the entire application.
@@ -2392,9 +2586,9 @@ def comprehensive_error_logger(func):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = f"logs/chess_ai_{timestamp}.log"
         
-        # Configure logging
+        # Configure logging - Use INFO level for root logger to avoid library debug spam
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=logging.INFO,  # Changed from DEBUG to INFO
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(log_filename),
@@ -2402,7 +2596,14 @@ def comprehensive_error_logger(func):
             ]
         )
         
-        logger = logging.getLogger(__name__)
+        # Suppress noisy library loggers
+        logging.getLogger('matplotlib').setLevel(logging.WARNING)
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+        logging.getLogger('PIL').setLevel(logging.WARNING)
+        
+        # Create logger for our application with DEBUG level
+        logger = logging.getLogger('chess_ai')
+        logger.setLevel(logging.DEBUG)  # Our code can still use DEBUG
         
         # Custom exception handler to log uncaught exceptions
         def handle_exception(exc_type, exc_value, exc_traceback):
@@ -2733,9 +2934,9 @@ class ParallelRussianDollMCTS:
 
 - Extension: .py
 - Language: python
-- Size: 25361 bytes
+- Size: 27994 bytes
 - Created: 2025-05-19 19:43:42
-- Modified: 2025-05-22 17:11:06
+- Modified: 2025-05-28 17:20:11
 
 ### Code
 
@@ -2749,11 +2950,10 @@ from evaluation import fast_evaluate_position, format_score
 from ui import NonClickableChessBoard
 #from threaded_board import ThreadedChessBoard
 from terminal_board import TerminalChessBoard
+import os
 
 # Find the display_full_menu function and modify it to prevent repetition
 def display_full_menu(chess_ai):
-    """Display the full menu of options after the initial workflow"""
-    print("\nChess AI Menu:")
     """Display the full menu of options after the initial workflow"""
     print("\nChess AI Menu:")
     print("1. Play against AI (human as white)")
@@ -2769,10 +2969,12 @@ def display_full_menu(chess_ai):
     print("11. Toggle enhanced features")
     print("12. Plot final game scores")
     print("13. Evaluate ELO rating")
-    print("14. Toggle AHA Learning")
+    
+    # Show current AHA status in the menu
+    aha_status = "ON" if getattr(chess_ai.dqn_agent, 'use_aha_learning', False) else "OFF"
+    print(f"14. Toggle AHA Learning (currently: {aha_status})")
     print("15. Configure AHA Learning settings") 
     print("16. Exit")
-    # Removed the infinite while loop that was here
 
 
 # Update this function in the main code
@@ -2930,8 +3132,14 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '14':
             current_state = getattr(chess_ai.dqn_agent, 'use_aha_learning', False)
             chess_ai.dqn_agent.use_aha_learning = not current_state
-            print(f"AHA Learning {'enabled' if chess_ai.dqn_agent.use_aha_learning else 'disabled'}")
-
+            new_state = "enabled" if chess_ai.dqn_agent.use_aha_learning else "disabled"
+            print(f"AHA Learning {new_state}")
+            
+            # If just enabled, show current settings
+            if chess_ai.dqn_agent.use_aha_learning:
+                print(f"  Budget per game: {chess_ai.dqn_agent.aha_budget_per_game}")
+                print(f"  Evaluation threshold: {chess_ai.dqn_agent.aha_threshold}")
+                print("  Use option 15 to configure these settings")
         elif choice == '15':
             print(f"Current AHA settings:")
             print(f"  Budget per game: {chess_ai.dqn_agent.aha_budget_per_game}")
@@ -2957,8 +3165,8 @@ def main():
     print("Optimized Chess AI with Russian Doll MCTS and Deep Q-Learning")
     print("------------------------------------------------------------")
     
-    # Create the AI with default settings
-    chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=True)
+    # Create the AI with AHA learning DISABLED by default
+    chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=False)  # Changed from True to False
     
     # First, determine the user's primary goal
     print("\nWhat would you like to do?")
@@ -3006,14 +3214,28 @@ def main():
             visual_play_game_with_features(chess_ai, human_color=human_color)
         else:
             play_game(chess_ai, human_color=human_color)
-    
     # TRAIN AI PATHWAY
     elif primary_goal == '2':
         # Ask about training from existing model
         continue_training = input("Continue training from an existing model? (y/n, default: n): ").lower() or 'n'
         
         if continue_training == 'y':
-            filename = input("Enter model filename (default: chess_model.pth): ") or "chess_model.pth"
+            # Check for default model first
+            default_model_path = os.path.join('models', 'chess_model.pth')
+            if os.path.exists(default_model_path):
+                use_default = input(f"Found model at {default_model_path}. Use this? (y/n, default: y): ").lower() or 'y'
+                if use_default == 'y':
+                    filename = default_model_path
+                else:
+                    filename = input("Enter model filename: ")
+            else:
+                filename = input("Enter model filename (will check models/ directory): ")
+                # If user didn't specify a path, check models directory
+                if filename and not os.path.dirname(filename) and not os.path.exists(filename):
+                    models_path = os.path.join('models', filename)
+                    if os.path.exists(models_path):
+                        filename = models_path
+            
             try:
                 chess_ai.load_model(filename, continue_training=True)
                 print(f"Continuing training from {filename}")
@@ -3027,6 +3249,27 @@ def main():
         verbose = input("Enable verbose output during training? (y/n, default: y): ").lower() or 'y'
         chess_ai.verbose = verbose == 'y'
         verbose = chess_ai.verbose  # Update local variable for menu
+        
+        # Ask about AHA learning
+        use_aha = input("Enable AHA Learning (AI learns from mistakes in real-time)? (y/n, default: n): ").lower() or 'n'
+        if use_aha == 'y':
+            chess_ai.dqn_agent.use_aha_learning = True
+            print("AHA Learning enabled - AI will correct mistakes during training")
+            
+            # Optionally configure AHA settings
+            configure_aha = input("Configure AHA settings? (y/n, default: n): ").lower() or 'n'
+            if configure_aha == 'y':
+                try:
+                    budget = int(input(f"AHA budget per game (default: {chess_ai.dqn_agent.aha_budget_per_game}): ") or chess_ai.dqn_agent.aha_budget_per_game)
+                    threshold = float(input(f"AHA threshold (default: {chess_ai.dqn_agent.aha_threshold}): ") or chess_ai.dqn_agent.aha_threshold)
+                    chess_ai.dqn_agent.aha_budget_per_game = budget
+                    chess_ai.dqn_agent.aha_threshold = threshold
+                    print(f"AHA settings updated: budget={budget}, threshold={threshold}")
+                except ValueError:
+                    print("Invalid input. Using default AHA settings.")
+        else:
+            chess_ai.dqn_agent.use_aha_learning = False
+            print("AHA Learning disabled - using standard training")
         
         # Start training
         print(f"\nStarting training for {chess_ai.training_games} games...")
@@ -3057,13 +3300,12 @@ def main():
             human_color = chess.WHITE if color_choice == 'w' else chess.BLACK
             
             if use_enhanced_features and use_visual_board:
-                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=human_color)
                 terminal_board.start()
             elif use_visual_board:
                 visual_play_game_with_features(chess_ai, human_color=human_color)
             else:
                 play_game(chess_ai, human_color=human_color)
-    
     # ANALYZE AI PATHWAY
     elif primary_goal == '3':
         # Load a model for analysis
@@ -3261,9 +3503,9 @@ if __name__ == "__main__":
 
 - Extension: .py
 - Language: python
-- Size: 11229 bytes
+- Size: 11380 bytes
 - Created: 2025-05-19 19:19:12
-- Modified: 2025-05-22 17:18:31
+- Modified: 2025-05-28 17:16:39
 
 ### Code
 
@@ -3279,8 +3521,9 @@ import numpy as np
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import threading
-from board_utils import board_to_tensor
-from mcts import ParallelRussianDollMCTS
+import chess  # CRITICAL: Required for chess.WHITE in AHA learning
+from board_utils import board_to_tensor, EVAL_CACHE  # Need EVAL_CACHE for cache clearing
+
 
 # Simpler Neural Network
 class ChessQNetwork(nn.Module):
@@ -3308,7 +3551,7 @@ class ChessQNetwork(nn.Module):
 
 class DQNAgent:
     def __init__(self, gamma=0.99, epsilon=0.1, epsilon_min=0.1, epsilon_decay=0.995, learning_rate=0.001,
-                 batch_size=64, use_aha_learning=False):
+                 batch_size=64, use_aha_learning=False):  # Already False by default, good!
         self.gamma = gamma  # discount factor
         self.epsilon = epsilon  # exploration rate
         self.epsilon_min = epsilon_min
@@ -3369,15 +3612,15 @@ class DQNAgent:
         
         # At this point, we've detected a significant mistake
         print(f"AHA! Detected potential mistake (eval drop: {eval_change:.2f})")
-        
+                
         # Step 1: Create immediate learning signal
         from board_utils import board_to_tensor
         state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
-        
+
         # Perform direct Q-value update (immediate negative feedback)
         self.optimizer.zero_grad()
         q_value = self.q_network(state_tensor)
-        target_q = torch.tensor([-1.0], device=self.device)  # Strong negative reward
+        target_q = torch.tensor([[-1.0]], device=self.device)  # FIX: Changed from [-1.0] to [[-1.0]] to match shape [1, 1]
         loss = F.mse_loss(q_value, target_q)
         loss.backward()
         self.optimizer.step()

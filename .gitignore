@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+training_data.csv
+training_plots/evaluation_trends.png
+training_plots/final_game_scores.png
+training_plots/latest_game_progression.png
+training_plots/move_counts.png
+training_plots/training_progress.png

@@ -4,9 +4,11 @@ import os
 import datetime
 import pickle
 import threading
-from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci
+import matplotlib.pyplot as plt  # Add this import
+from board_utils import print_board, get_legal_moves_from_square, square_name_to_square, get_move_uci, get_secondary_moves
 from evaluation import find_threatened_squares, find_guarded_squares, format_score, fast_evaluate_position
-#from ui import ChessBoardVisualizer, NonClickableChessBoard
+from ui import create_visual_chess_board  # Add this import
+# Remove duplicate imports and unused imports
 import chess.pgn
 
 
