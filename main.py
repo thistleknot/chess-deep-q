@@ -4,16 +4,19 @@ import random
 import chess
 import os
 import sys
-
-# ADD THESE MISSING IMPORTS:
 import logging
 import functools
 import traceback
 from datetime import datetime
 
+# IMPORTANT: Suppress matplotlib debug logging
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
 # Set matplotlib backend BEFORE any other matplotlib imports
 import matplotlib
-matplotlib.use('TkAgg')  # Force TkAgg backend which is interactive
+matplotlib.use('Agg')  # Use non-interactive backend for training
+import matplotlib.pyplot as plt
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -73,6 +76,8 @@ def setup_environment():
 import traceback
 
 # STEP 2: ADD this decorator function (but keep your existing functions):
+# In main.py, in the comprehensive_error_logger function, update the logging configuration:
+
 def comprehensive_error_logger(func):
     """
     Decorator that sets up comprehensive logging for the entire application.
@@ -87,9 +92,9 @@ def comprehensive_error_logger(func):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_filename = f"logs/chess_ai_{timestamp}.log"
         
-        # Configure logging
+        # Configure logging - Use INFO level for root logger to avoid library debug spam
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=logging.INFO,  # Changed from DEBUG to INFO
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
                 logging.FileHandler(log_filename),
@@ -97,7 +102,14 @@ def comprehensive_error_logger(func):
             ]
         )
         
-        logger = logging.getLogger(__name__)
+        # Suppress noisy library loggers
+        logging.getLogger('matplotlib').setLevel(logging.WARNING)
+        logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+        logging.getLogger('PIL').setLevel(logging.WARNING)
+        
+        # Create logger for our application with DEBUG level
+        logger = logging.getLogger('chess_ai')
+        logger.setLevel(logging.DEBUG)  # Our code can still use DEBUG
         
         # Custom exception handler to log uncaught exceptions
         def handle_exception(exc_type, exc_value, exc_traceback):

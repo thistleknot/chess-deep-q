@@ -9,8 +9,9 @@ import numpy as np
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 import threading
-from board_utils import board_to_tensor
-from mcts import ParallelRussianDollMCTS
+import chess  # CRITICAL: Required for chess.WHITE in AHA learning
+from board_utils import board_to_tensor, EVAL_CACHE  # Need EVAL_CACHE for cache clearing
+
 
 # Simpler Neural Network
 class ChessQNetwork(nn.Module):
@@ -38,7 +39,7 @@ class ChessQNetwork(nn.Module):
 
 class DQNAgent:
     def __init__(self, gamma=0.99, epsilon=0.1, epsilon_min=0.1, epsilon_decay=0.995, learning_rate=0.001,
-                 batch_size=64, use_aha_learning=False):
+                 batch_size=64, use_aha_learning=False):  # Already False by default, good!
         self.gamma = gamma  # discount factor
         self.epsilon = epsilon  # exploration rate
         self.epsilon_min = epsilon_min
@@ -99,15 +100,15 @@ class DQNAgent:
         
         # At this point, we've detected a significant mistake
         print(f"AHA! Detected potential mistake (eval drop: {eval_change:.2f})")
-        
+                
         # Step 1: Create immediate learning signal
         from board_utils import board_to_tensor
         state_tensor = board_to_tensor(board).unsqueeze(0).to(self.device)
-        
+
         # Perform direct Q-value update (immediate negative feedback)
         self.optimizer.zero_grad()
         q_value = self.q_network(state_tensor)
-        target_q = torch.tensor([-1.0], device=self.device)  # Strong negative reward
+        target_q = torch.tensor([[-1.0]], device=self.device)  # FIX: Changed from [-1.0] to [[-1.0]] to match shape [1, 1]
         loss = F.mse_loss(q_value, target_q)
         loss.backward()
         self.optimizer.step()

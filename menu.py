@@ -7,11 +7,10 @@ from evaluation import fast_evaluate_position, format_score
 from ui import NonClickableChessBoard
 #from threaded_board import ThreadedChessBoard
 from terminal_board import TerminalChessBoard
+import os
 
 # Find the display_full_menu function and modify it to prevent repetition
 def display_full_menu(chess_ai):
-    """Display the full menu of options after the initial workflow"""
-    print("\nChess AI Menu:")
     """Display the full menu of options after the initial workflow"""
     print("\nChess AI Menu:")
     print("1. Play against AI (human as white)")
@@ -27,10 +26,12 @@ def display_full_menu(chess_ai):
     print("11. Toggle enhanced features")
     print("12. Plot final game scores")
     print("13. Evaluate ELO rating")
-    print("14. Toggle AHA Learning")
+    
+    # Show current AHA status in the menu
+    aha_status = "ON" if getattr(chess_ai.dqn_agent, 'use_aha_learning', False) else "OFF"
+    print(f"14. Toggle AHA Learning (currently: {aha_status})")
     print("15. Configure AHA Learning settings") 
     print("16. Exit")
-    # Removed the infinite while loop that was here
 
 
 # Update this function in the main code
@@ -188,8 +189,14 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '14':
             current_state = getattr(chess_ai.dqn_agent, 'use_aha_learning', False)
             chess_ai.dqn_agent.use_aha_learning = not current_state
-            print(f"AHA Learning {'enabled' if chess_ai.dqn_agent.use_aha_learning else 'disabled'}")
-
+            new_state = "enabled" if chess_ai.dqn_agent.use_aha_learning else "disabled"
+            print(f"AHA Learning {new_state}")
+            
+            # If just enabled, show current settings
+            if chess_ai.dqn_agent.use_aha_learning:
+                print(f"  Budget per game: {chess_ai.dqn_agent.aha_budget_per_game}")
+                print(f"  Evaluation threshold: {chess_ai.dqn_agent.aha_threshold}")
+                print("  Use option 15 to configure these settings")
         elif choice == '15':
             print(f"Current AHA settings:")
             print(f"  Budget per game: {chess_ai.dqn_agent.aha_budget_per_game}")
@@ -215,8 +222,8 @@ def main():
     print("Optimized Chess AI with Russian Doll MCTS and Deep Q-Learning")
     print("------------------------------------------------------------")
     
-    # Create the AI with default settings
-    chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=True)
+    # Create the AI with AHA learning DISABLED by default
+    chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=False)  # Changed from True to False
     
     # First, determine the user's primary goal
     print("\nWhat would you like to do?")
@@ -264,14 +271,28 @@ def main():
             visual_play_game_with_features(chess_ai, human_color=human_color)
         else:
             play_game(chess_ai, human_color=human_color)
-    
     # TRAIN AI PATHWAY
     elif primary_goal == '2':
         # Ask about training from existing model
         continue_training = input("Continue training from an existing model? (y/n, default: n): ").lower() or 'n'
         
         if continue_training == 'y':
-            filename = input("Enter model filename (default: chess_model.pth): ") or "chess_model.pth"
+            # Check for default model first
+            default_model_path = os.path.join('models', 'chess_model.pth')
+            if os.path.exists(default_model_path):
+                use_default = input(f"Found model at {default_model_path}. Use this? (y/n, default: y): ").lower() or 'y'
+                if use_default == 'y':
+                    filename = default_model_path
+                else:
+                    filename = input("Enter model filename: ")
+            else:
+                filename = input("Enter model filename (will check models/ directory): ")
+                # If user didn't specify a path, check models directory
+                if filename and not os.path.dirname(filename) and not os.path.exists(filename):
+                    models_path = os.path.join('models', filename)
+                    if os.path.exists(models_path):
+                        filename = models_path
+            
             try:
                 chess_ai.load_model(filename, continue_training=True)
                 print(f"Continuing training from {filename}")
@@ -285,6 +306,27 @@ def main():
         verbose = input("Enable verbose output during training? (y/n, default: y): ").lower() or 'y'
         chess_ai.verbose = verbose == 'y'
         verbose = chess_ai.verbose  # Update local variable for menu
+        
+        # Ask about AHA learning
+        use_aha = input("Enable AHA Learning (AI learns from mistakes in real-time)? (y/n, default: n): ").lower() or 'n'
+        if use_aha == 'y':
+            chess_ai.dqn_agent.use_aha_learning = True
+            print("AHA Learning enabled - AI will correct mistakes during training")
+            
+            # Optionally configure AHA settings
+            configure_aha = input("Configure AHA settings? (y/n, default: n): ").lower() or 'n'
+            if configure_aha == 'y':
+                try:
+                    budget = int(input(f"AHA budget per game (default: {chess_ai.dqn_agent.aha_budget_per_game}): ") or chess_ai.dqn_agent.aha_budget_per_game)
+                    threshold = float(input(f"AHA threshold (default: {chess_ai.dqn_agent.aha_threshold}): ") or chess_ai.dqn_agent.aha_threshold)
+                    chess_ai.dqn_agent.aha_budget_per_game = budget
+                    chess_ai.dqn_agent.aha_threshold = threshold
+                    print(f"AHA settings updated: budget={budget}, threshold={threshold}")
+                except ValueError:
+                    print("Invalid input. Using default AHA settings.")
+        else:
+            chess_ai.dqn_agent.use_aha_learning = False
+            print("AHA Learning disabled - using standard training")
         
         # Start training
         print(f"\nStarting training for {chess_ai.training_games} games...")
@@ -315,13 +357,12 @@ def main():
             human_color = chess.WHITE if color_choice == 'w' else chess.BLACK
             
             if use_enhanced_features and use_visual_board:
-                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=human_color)
                 terminal_board.start()
             elif use_visual_board:
                 visual_play_game_with_features(chess_ai, human_color=human_color)
             else:
                 play_game(chess_ai, human_color=human_color)
-    
     # ANALYZE AI PATHWAY
     elif primary_goal == '3':
         # Load a model for analysis
