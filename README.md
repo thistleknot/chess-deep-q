@@ -26,7 +26,7 @@ python main.py
 
 | Version 1.4 |
 |--------------|
-| ![Chess v1.4](images/chess-v1.4.png) |
+| ![Chess v1.4](images/chess-v1.3.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
