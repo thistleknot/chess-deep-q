@@ -16,6 +16,8 @@ from tqdm import tqdm
 from neural_network import ChessQNetwork, DQNAgent
 from mcts import ParallelRussianDollMCTS
 from evaluation import fast_evaluate_position, format_score
+from annealing import AnnealingSchedule
+from constants import USE_DYNAMIC_DIFFICULTY, DIFFICULTY_OFFSET
 
 from board_utils import board_to_tensor, EVAL_CACHE, CACHE_LOCK, get_move_uci
 
@@ -31,7 +33,25 @@ class OptimizedChessAI:
         self.epsilon_history = []
         self.verbose = verbose
         self.move_count_history = []
-        
+
+        # Annealing schedule (single source of truth for prior->learned coefficients).
+        self.schedule = AnnealingSchedule()
+
+        # Failure-mode monitoring (see spec/training-loop.spec.md): prior lock-in, policy
+        # collapse, and reward-hacking signals accumulated per game.
+        self.prior_agreement_history = []   # fraction of moves matching the prior's greedy move
+        self.opening_move_history = []      # first move (uci) of each game, for diversity
+        self.ahead_but_not_won_history = [] # games led on prior eval yet failed to win
+
+        # Dynamic-difficulty settings persist across the menu session and are applied whenever a
+        # human game (TerminalChessBoard) is created.
+        self.difficulty_settings = {
+            'enabled': USE_DYNAMIC_DIFFICULTY,
+            'mode': 'auto',            # 'auto' = match my skill; 'fixed' = constant temperature
+            'fixed_temperature': 0.5,
+            'offset': DIFFICULTY_OFFSET,
+        }
+
         # Set number of CPU cores to use
         self.num_cpu_cores = max(1, multiprocessing.cpu_count() - 1)
         print(f"Using {self.num_cpu_cores} CPU cores for parallel processing")
@@ -48,15 +68,40 @@ class OptimizedChessAI:
         """Make a move on the board"""
         self.board.push(move)
         
-    def get_best_move(self, training_progress=0.0, is_training=False, current_move=0, max_moves=200):
-        """Get the best move for the current position"""
+    def get_best_move(self, training_progress=0.0, is_training=False, current_move=0,
+                      max_moves=200, temperature=0.0, iterations=None):
+        """Get the best move for the current position.
+
+        temperature (0 = argmax) lets the difficulty controller weaken play during human games;
+        training always uses argmax. iterations caps the MCTS budget (fast ELO calibration).
+        """
         return self.dqn_agent.select_move(
-            self.board, 
-            training_progress, 
-            is_training, 
-            current_move, 
-            max_moves
+            self.board,
+            training_progress,
+            is_training,
+            current_move,
+            max_moves,
+            temperature=temperature,
+            iterations=iterations,
         )
+
+    def _prior_greedy_move(self, board):
+        """The fixed prior's greedy move from `board`, in the mover's perspective.
+
+        Returns the legal move whose resulting position the heuristic evaluator scores best for
+        the side to move. Used only for the prior-agreement monitoring metric; the evaluator is
+        White-absolute so we flip sign for Black.
+        """
+        white_to_move = board.turn == chess.WHITE
+        best_move, best_score = None, None
+        for candidate in board.legal_moves:
+            probe = board.copy()
+            probe.push(candidate)
+            score = fast_evaluate_position(probe)
+            score = score if white_to_move else -score
+            if best_score is None or score > best_score:
+                best_score, best_move = score, candidate
+        return best_move
     def plot_evaluation_trends_across_games(self):
         """Plot the evaluation trends across all games"""
         if not self.game_history:
@@ -127,7 +172,8 @@ class OptimizedChessAI:
         
         move_count = 0
         game_moves = []
-        
+        prior_hits = 0  # moves where the played move matched the prior's greedy move
+
         # For score tracking and plotting
         white_scores = []
         black_scores = []
@@ -153,7 +199,12 @@ class OptimizedChessAI:
             
             if move is None:
                 break
-                
+
+            # Prior-agreement monitoring: does the search choice match the prior's greedy move?
+            # High sustained agreement late in training signals prior lock-in / derivative play.
+            if self._prior_greedy_move(state_before) == move:
+                prior_hits += 1
+
             self.make_move(move)
             game_moves.append(get_move_uci(move))
             move_count += 1
@@ -171,17 +222,21 @@ class OptimizedChessAI:
                 black_score_str = format_score(-raw_score)
                 print(f"\rGame {len(self.game_history)+1}: Move {move_count}/{max_moves} - White: {white_score_str} | Black: {black_score_str}", end="", flush=True)
             
-            # Get the reward
+            # Get the reward (White-absolute frame, matching the value network's convention).
             if self.board.is_checkmate():
-                reward = -1.0
+                # The side to move is checkmated; the mover just won. +1 if White delivered mate
+                # (Black is checkmated), -1 if Black delivered mate.
+                reward = 1.0 if self.board.turn == chess.BLACK else -1.0
                 done = True
             elif self.board.is_stalemate() or self.board.is_insufficient_material():
                 reward = 0.0
                 done = True
             else:
-                # Use evaluation function for reward signal
+                # Prior-derived shaped reward, weighted down as training progresses so the
+                # terminal outcome increasingly owns the objective (see spec/learned-model.spec.md).
                 eval_score = fast_evaluate_position(self.board)
-                reward = 0.01 * math.tanh(eval_score / 10.0)  # Normalize and scale down
+                shaped_weight = self.schedule.shaped_reward_weight(training_progress)
+                reward = shaped_weight * 0.01 * math.tanh(eval_score / 10.0)
                 done = False
             
             # Store the transition
@@ -204,7 +259,17 @@ class OptimizedChessAI:
             print(f"Result: {result}, Moves: {move_count}")
         
         final_evaluation = fast_evaluate_position(self.board, ignore_checkmate=True)
-        
+
+        # Failure-mode monitoring metrics (see spec/training-loop.spec.md).
+        prior_agreement = prior_hits / move_count if move_count > 0 else 0.0
+        opening_move = game_moves[0] if game_moves else None
+        # Reward-hacking proxy: a wide prior lead that did not convert into a win.
+        ahead_but_not_won = 0
+        if final_evaluation > 3.0 and result != '1-0':
+            ahead_but_not_won = 1
+        elif final_evaluation < -3.0 and result != '0-1':
+            ahead_but_not_won = 1
+
         # Store the game data with the proper evaluation
         self.game_history.append({
             'moves': game_moves,
@@ -212,12 +277,18 @@ class OptimizedChessAI:
             'move_count': move_count,
             'white_scores': white_scores,
             'black_scores': black_scores,
-            'final_score': final_evaluation  # Store the actual numerical value
+            'final_score': final_evaluation,  # Store the actual numerical value
+            'prior_agreement': prior_agreement,
+            'opening_move': opening_move,
+            'ahead_but_not_won': ahead_but_not_won,
         })
-        
+
         self.evaluation_history.append(final_evaluation)
         self.epsilon_history.append(self.dqn_agent.epsilon)
         self.move_count_history.append(move_count)
+        self.prior_agreement_history.append(prior_agreement)
+        self.opening_move_history.append(opening_move)
+        self.ahead_but_not_won_history.append(ahead_but_not_won)
         
         # SAVE the game progress plot to disk instead of showing it
         if self.verbose and len(white_scores) > 0:
@@ -563,8 +634,39 @@ class OptimizedChessAI:
             plt.tight_layout()
             plt.savefig(os.path.join(plot_dir, 'move_counts.png'), dpi=150)
             plt.close()
-        
-        print(f"Saved plots: evaluation_trends.png, training_progress.png, final_game_scores.png, move_counts.png")
+
+        # 5. Save failure-mode monitoring plot (prior lock-in + policy collapse).
+        if self.prior_agreement_history:
+            games = range(1, len(self.prior_agreement_history) + 1)
+            # Rolling opening diversity: distinct first moves within a trailing window.
+            window = 10
+            diversity = []
+            for i in range(len(self.opening_move_history)):
+                start = max(0, i - window + 1)
+                recent = [m for m in self.opening_move_history[start:i + 1] if m is not None]
+                diversity.append(len(set(recent)))
+
+            fig, ax1 = plt.subplots(figsize=(10, 6))
+            ax1.plot(games, self.prior_agreement_history, 'purple', marker='o',
+                     label='Prior agreement')
+            ax1.set_xlabel('Game Number')
+            ax1.set_ylabel('Prior agreement (fraction)', color='purple')
+            ax1.set_ylim(0, 1)
+            ax1.tick_params(axis='y', labelcolor='purple')
+            ax1.grid(True, alpha=0.3)
+
+            ax2 = ax1.twinx()
+            ax2.plot(games, diversity, 'teal', marker='s', alpha=0.6,
+                     label=f'Opening diversity (last {window})')
+            ax2.set_ylabel('Distinct opening moves', color='teal')
+            ax2.tick_params(axis='y', labelcolor='teal')
+
+            plt.title('Failure-mode monitoring: prior lock-in & policy collapse')
+            fig.tight_layout()
+            plt.savefig(os.path.join(plot_dir, 'monitoring.png'), dpi=150)
+            plt.close()
+
+        print(f"Saved plots: evaluation_trends.png, training_progress.png, final_game_scores.png, move_counts.png, monitoring.png")
     
     def plot_training_progress(self):
         """Plot the training progress"""
@@ -626,6 +728,9 @@ class OptimizedChessAI:
             'loss_history': self.loss_history,
             'epsilon_history': self.epsilon_history,
             'move_count_history': self.move_count_history,
+            'prior_agreement_history': self.prior_agreement_history,
+            'opening_move_history': self.opening_move_history,
+            'ahead_but_not_won_history': self.ahead_but_not_won_history,
             'total_games_trained': len(self.game_history),
             'training_games': self.training_games,
             'save_timestamp': time.time()
@@ -667,6 +772,10 @@ class OptimizedChessAI:
                 self.epsilon_history = checkpoint['epsilon_history']
             if 'move_count_history' in checkpoint:
                 self.move_count_history = checkpoint['move_count_history']
+            # Monitoring histories (added later; default to empty for older checkpoints).
+            self.prior_agreement_history = checkpoint.get('prior_agreement_history', [])
+            self.opening_move_history = checkpoint.get('opening_move_history', [])
+            self.ahead_but_not_won_history = checkpoint.get('ahead_but_not_won_history', [])
             if 'total_games_trained' in checkpoint:
                 print(f"Loaded model trained on {checkpoint['total_games_trained']} games")
         

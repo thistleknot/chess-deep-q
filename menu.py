@@ -30,8 +30,13 @@ def display_full_menu(chess_ai):
     # Show current AHA status in the menu
     aha_status = "ON" if getattr(chess_ai.dqn_agent, 'use_aha_learning', False) else "OFF"
     print(f"14. Toggle AHA Learning (currently: {aha_status})")
-    print("15. Configure AHA Learning settings") 
-    print("16. Exit")
+    print("15. Configure AHA Learning settings")
+
+    # Show current dynamic-difficulty status in the menu
+    dda_status = "ON" if chess_ai.difficulty_settings.get('enabled', False) else "OFF"
+    print(f"16. Toggle Dynamic Difficulty (currently: {dda_status})")
+    print("17. Configure Dynamic Difficulty settings")
+    print("18. Exit")
 
 
 # Update this function in the main code
@@ -56,7 +61,7 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '2':
             if use_enhanced_features and use_visual_board:
                 # Use the non-clickable board with enhanced features
-                threaded_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
+                terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.BLACK)
                 terminal_board.start()
             elif use_visual_board:
                 visual_play_game(chess_ai, human_color=chess.BLACK)
@@ -140,8 +145,8 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
                 # Ask if user wants to play from this position
                 play_choice = input("Do you want to play from this position? (y/n): ").lower()
                 if play_choice == 'y':
-                    human_color_choice = input("Play as white or black? (w/b): ").lower()
-                    human_color = chess.WHITE if human_color_choice == 'w' else chess.BLACK
+                    human_color_choice = input("Play as white or black? (w/b, default: w): ").lower() or 'w'
+                    human_color = chess.BLACK if human_color_choice.startswith('b') else chess.WHITE
                     
                     if use_enhanced_features and use_visual_board:
                         terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
@@ -211,19 +216,118 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
                 print("AHA Learning settings updated!")
             except ValueError:
                 print("Invalid input. Settings unchanged.")
+        elif choice == '16':
+            dda = chess_ai.difficulty_settings
+            dda['enabled'] = not dda.get('enabled', False)
+            print(f"Dynamic Difficulty {'enabled' if dda['enabled'] else 'disabled'}")
+            if dda['enabled']:
+                print(f"  Regret offset: {dda['offset']}  (+ = stronger opponent, - = handicap)")
+                print("  Use option 17 to configure these settings")
+        elif choice == '17':
+            dda = chess_ai.difficulty_settings
+            cal = getattr(chess_ai, 'elo_calibrator', None)
+            print("Current Dynamic Difficulty settings:")
+            print(f"  Regret offset: {dda['offset']}  (+ = harder, - = easier)")
+            if cal is not None:
+                status = "calibrated" if cal.is_calibrated() else "NOT calibrated"
+                anchor = "measured" if cal.anchor_measured else "assumed"
+                print(f"  ELO calibration: {status}; full-strength anchor {cal.anchor_elo:.0f} ({anchor})")
+            try:
+                dda['offset'] = float(input(f"Enter new regret offset (current: {dda['offset']}): ") or dda['offset'])
+                print("Dynamic Difficulty settings updated!")
+            except ValueError:
+                print("Invalid input. Settings unchanged.")
+            # Optional: run/refresh the temperature->ELO calibration (compute-heavy).
+            if cal is not None:
+                run_cal = input("Run/refresh ELO calibration now? (compute-heavy) (y/n, default n): ").lower() or 'n'
+                if run_cal == 'y':
+                    from constants import ELO_CALIBRATION_PATH
+                    anchor_in = input(f"Full-strength ELO anchor (blank keeps {cal.anchor_elo:.0f}): ").strip()
+                    if anchor_in:
+                        try:
+                            cal.anchor_elo = float(anchor_in)
+                            cal.anchor_measured = False
+                        except ValueError:
+                            print("Invalid anchor; keeping current.")
+                    try:
+                        games = int(input("Games per temperature (default 20): ") or 20)
+                    except ValueError:
+                        games = 20
+                    print("Calibrating (playing self-play games at several temperatures)...")
+                    cal.calibrate(chess_ai, games_per_tau=games)
+                    cal.save(ELO_CALIBRATION_PATH)
+                    print(f"Calibration saved to {ELO_CALIBRATION_PATH}.")
+        elif choice == '18':
+            print("Exiting menu.")
+            break
         else:
-            print("Invalid choice. Please enter a number between 1 and 15.")
+            print("Invalid choice. Please enter a number between 1 and 18.")
     
     # Return the updated feature flags
     return verbose, use_visual_board, use_enhanced_features
 
 
+def _setup_difficulty(chess_ai):
+    """Ask how the opponent should scale: full strength, auto-match, or a fixed temperature."""
+    dda = chess_ai.difficulty_settings
+    cal = getattr(chess_ai, 'elo_calibrator', None)
+    print("\nDifficulty:")
+    print("  1. Full strength (default)")
+    print("  2. Auto-adjust to my skill")
+    print("  3. Fixed strength (I set the temperature)")
+    choice = input("Choose (1-3, default 1): ").strip() or '1'
+    if choice == '2':
+        dda['enabled'], dda['mode'] = True, 'auto'
+        val = input(f"Harder/easier offset (+ harder / - easier, default {dda['offset']}): ").strip()
+        if val:
+            try:
+                dda['offset'] = float(val)
+            except ValueError:
+                print("  invalid; keeping default")
+        print("Auto-adjust ON: the opponent tracks your level; estimated ELO is shown each turn.")
+        if getattr(cal, 'approximate', False):
+            print("  (ELO uses an approximate curve — no warm-up needed. Refine it anytime from "
+                  "the settings menu.)")
+    elif choice == '3':
+        dda['enabled'], dda['mode'] = True, 'fixed'
+        label = "approx" if getattr(cal, 'approximate', False) else "calibrated"
+        print(f"Temperature -> ELO ({label}):")
+        for t in sorted(cal.table):
+            print(f"    temp {t:>4.2f}  ~{cal.policy_elo(t):.0f} ELO")
+        val = input("Set opponent temperature (0 = strongest, higher = weaker; default 0.5): ").strip()
+        try:
+            dda['fixed_temperature'] = float(val) if val else 0.5
+        except ValueError:
+            dda['fixed_temperature'] = 0.5
+        print(f"  -> opponent is approximately {cal.policy_elo(dda['fixed_temperature']):.0f} ELO ({label})")
+        if getattr(cal, 'approximate', False):
+            print("  (Approximate curve — no warm-up needed. Refine it anytime from the settings menu.)")
+    else:
+        dda['enabled'], dda['mode'] = False, 'off'
+        print("Full strength.")
+
+
 def main():
-    print("Optimized Chess AI with Russian Doll MCTS and Deep Q-Learning")
+    print("Chess AI: value-net TD critic + Russian Doll MCTS (AlphaZero-lite)")
     print("------------------------------------------------------------")
     
     # Create the AI with AHA learning DISABLED by default
     chess_ai = OptimizedChessAI(training_games=20, verbose=True, use_aha_learning=False)  # Changed from True to False
+
+    # Load a saved temperature->ELO calibration if present, so difficulty can show ELO.
+    import os
+    from elo_calibration import TemperatureEloCalibrator
+    from constants import ELO_CALIBRATION_PATH
+    if os.path.exists(ELO_CALIBRATION_PATH):
+        try:
+            chess_ai.elo_calibrator = TemperatureEloCalibrator.load(ELO_CALIBRATION_PATH)
+            print(f"Loaded ELO calibration (full-strength anchor "
+                  f"{'measured' if chess_ai.elo_calibrator.anchor_measured else 'assumed'} "
+                  f"{chess_ai.elo_calibrator.anchor_elo:.0f}).")
+        except Exception:
+            chess_ai.elo_calibrator = TemperatureEloCalibrator()
+    else:
+        chess_ai.elo_calibrator = TemperatureEloCalibrator()
     
     # First, determine the user's primary goal
     print("\nWhat would you like to do?")
@@ -261,11 +365,14 @@ def main():
         
         # Choose color
         color_choice = input("Play as white or black? (w/b, default: w): ").lower() or 'w'
-        human_color = chess.WHITE if color_choice == 'w' else chess.BLACK
-        
+        human_color = chess.BLACK if color_choice.startswith('b') else chess.WHITE
+
+        # Difficulty: full strength, auto-adjust to your skill, or a fixed temperature you set.
+        _setup_difficulty(chess_ai)
+
         # Start the game
         if use_enhanced_features and use_visual_board:
-            terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=chess.WHITE)
+            terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=human_color)
             terminal_board.start()
         elif use_visual_board:
             visual_play_game_with_features(chess_ai, human_color=human_color)
@@ -354,7 +461,7 @@ def main():
             use_enhanced_features = enhanced_features == 'y'
             
             color_choice = input("Play as white or black? (w/b, default: w): ").lower() or 'w'
-            human_color = chess.WHITE if color_choice == 'w' else chess.BLACK
+            human_color = chess.BLACK if color_choice.startswith('b') else chess.WHITE
             
             if use_enhanced_features and use_visual_board:
                 terminal_board = TerminalChessBoard(chess.Board(), chess_ai, human_color=human_color)

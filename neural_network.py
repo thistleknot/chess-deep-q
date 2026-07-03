@@ -11,9 +11,17 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import chess  # CRITICAL: Required for chess.WHITE in AHA learning
 from board_utils import board_to_tensor, EVAL_CACHE  # Need EVAL_CACHE for cache clearing
+from annealing import AnnealingSchedule
+from constants import (
+    GAMMA, LEARNING_RATE, BATCH_SIZE, REPLAY_CAPACITY,
+    AHA_BUDGET_PER_GAME, AHA_THRESHOLD,
+)
 
 
-# Simpler Neural Network
+# NOTE (see spec/rl-categorization.spec.md): despite the historical name, this is a state-VALUE
+# network V(s) -- a single scalar value head, NOT action-value Q(s,a). There is no per-action head
+# and no max_a in training; moves are chosen by MCTS. It is the value-critic half of an
+# AlphaZero-lite system (TD-Gammon lineage), not literal DQN. The name is kept for compatibility.
 class ChessQNetwork(nn.Module):
     def __init__(self):
         super(ChessQNetwork, self).__init__()
@@ -38,33 +46,48 @@ class ChessQNetwork(nn.Module):
         return x
 
 class DQNAgent:
-    def __init__(self, gamma=0.99, epsilon=0.1, epsilon_min=0.1, epsilon_decay=0.995, learning_rate=0.001,
-                 batch_size=64, use_aha_learning=False):  # Already False by default, good!
+    """Value-critic agent (name kept for compatibility). See spec/rl-categorization.spec.md.
+
+    Classification, qualified: OFF-POLICY (replay buffer, uncorrected), ONLINE (self-generated
+    self-play, not offline), VALUE-BASED (V(s) critic, no policy gradient, not actor-critic),
+    TD(0) bootstrap with a target network, MODEL-FREE learning + known-model MCTS planning.
+    It is DQN-*family* in its stability tricks but NOT action-value Q-learning and NOT SARSA/PPO.
+    """
+
+    def __init__(self, gamma=GAMMA, epsilon=0.1, epsilon_min=0.1, epsilon_decay=0.995,
+                 learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, use_aha_learning=False):
         self.gamma = gamma  # discount factor
-        self.epsilon = epsilon  # exploration rate
+        # epsilon is retained only for checkpoint/plot compatibility; the behaviour policy is
+        # MCTS (structured exploration), so epsilon never drives move selection.
+        self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
-        
+
+        # Annealing schedule: single source of truth for prior->learned coefficients.
+        self.schedule = AnnealingSchedule()
+        # Argmax root move from the most recent search, exposed for difficulty regret scoring.
+        self.last_root_best = None
+
         # AHA Learning parameters
         self.use_aha_learning = use_aha_learning
-        self.aha_budget_per_game = 3  # Max aha moments per game
-        self.aha_budget_remaining = 3
-        self.aha_threshold = -1.5  # Trigger when eval drops by this much
-        
+        self.aha_budget_per_game = AHA_BUDGET_PER_GAME  # Max aha moments per game
+        self.aha_budget_remaining = AHA_BUDGET_PER_GAME
+        self.aha_threshold = AHA_THRESHOLD  # Trigger when eval drops by this much
+
         if self.use_aha_learning:
             print("AHA Learning enabled - AI can correct mistakes during training")
-        
+
         # Q-Networks
         self.q_network = ChessQNetwork().to(self.device)
         self.target_q_network = ChessQNetwork().to(self.device)
         self.update_target_network()
-        
+
         self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
-        self.memory = deque(maxlen=10000)  # replay buffer
+        self.memory = deque(maxlen=REPLAY_CAPACITY)  # replay buffer
         
         # Number of CPU cores for parallel processing
         self.num_cpu_cores = max(1, multiprocessing.cpu_count() - 1)
@@ -146,64 +169,76 @@ class DQNAgent:
         
         return best_alternative
     
-    def _get_mcts_move(self, board, training_progress, current_move, max_moves):
-        """Extract MCTS move selection into separate method to avoid code duplication"""
-        # Adjust MCTS iterations and parameters based on training progress
-        base_iterations = int(50 + 150 * training_progress)  # 50 to 200 iterations
-        exploration_weight = max(1.6 * (1 - 0.5 * training_progress), 0.8)
-        
-        # Adjust sampling width at each level based on training progress
-        samples_per_level = [
-            max(21, int(25 * (1 - 0.3 * training_progress))),  # Level 1
-            max(13, int(15 * (1 - 0.3 * training_progress))),  # Level 2
-            max(8, int(10 * (1 - 0.3 * training_progress))),   # Level 3
-            max(5, int(7 * (1 - 0.3 * training_progress))),    # Level 4
-            max(3, int(5 * (1 - 0.3 * training_progress))),    # Level 5
-            max(2, int(3 * (1 - 0.3 * training_progress))),    # Level 6
-            max(1, int(2 * (1 - 0.3 * training_progress)))     # Level 7
-        ]
-        
+    def _get_mcts_move(self, board, training_progress, current_move, max_moves, temperature=0.0,
+                       iterations=None):
+        """Run Russian Doll MCTS with schedule-driven annealing; return the selected move.
+
+        All progress-driven parameters come from the AnnealingSchedule (single source of truth).
+        temperature controls root selection strength (0 = argmax); the argmax move is cached in
+        self.last_root_best for difficulty regret scoring. iterations, when given, overrides the
+        progress-scaled search budget (used for fast ELO calibration).
+        """
+        base_iterations = iterations if iterations is not None else int(50 + 150 * training_progress)
+        exploration_weight = self.schedule.mcts_exploration_weight(training_progress)
+        samples_per_level = self.schedule.samples_per_level(training_progress)
+        learned_leaf_weight = self.schedule.learned_leaf_weight(training_progress)
+        prior_bias_temperature = self.schedule.prior_bias_temperature(training_progress)
+
         # Use parallel MCTS with annealing parameters
         from mcts import ParallelRussianDollMCTS
         mcts = ParallelRussianDollMCTS(
-            board, 
+            board,
             iterations=base_iterations,
             exploration_weight=exploration_weight,
             samples_per_level=samples_per_level,
-            num_workers=self.num_cpu_cores
+            num_workers=self.num_cpu_cores,
+            learned_leaf_weight=learned_leaf_weight,
+            prior_bias_temperature=prior_bias_temperature,
         )
-        
-        return mcts.search(
-            neural_net=self.q_network, 
+
+        move = mcts.search(
+            neural_net=self.q_network,
             device=self.device,
             training_progress=training_progress,
             current_move=current_move,
-            max_moves=max_moves
+            max_moves=max_moves,
+            temperature=temperature,
         )
+        self.last_root_best = mcts.best_action
+        return move
 
     def update_target_network(self):
         """Copy weights from the Q-network to the target network"""
         self.target_q_network.load_state_dict(self.q_network.state_dict())
     
     def get_q_value(self, board):
-        """Get the Q-value for a given board position"""
+        """State VALUE V(s) for a position (not action-value Q; see spec/rl-categorization)."""
         state = board_to_tensor(board).unsqueeze(0).to(self.device)
         with torch.no_grad():
             return self.q_network(state).item()
 
-    def select_move(self, board, training_progress=0.0, is_training=False, current_move=0, max_moves=200):
+    # Truthful alias per the categorization spec; get_q_value is retained for compatibility.
+    get_value = get_q_value
+
+    def select_move(self, board, training_progress=0.0, is_training=False, current_move=0,
+                    max_moves=200, temperature=0.0, iterations=None):
+        # At inference the model is mature: use full schedule progress so the leaf blend favours
+        # the learned network rather than the prior (training passes its real progress).
+        effective_progress = training_progress if is_training else 1.0
+
         # Use AHA learning if enabled, during training, and budget available
-        if (hasattr(self, 'use_aha_learning') and self.use_aha_learning and 
-            is_training and hasattr(self, 'aha_budget_remaining') and 
+        if (hasattr(self, 'use_aha_learning') and self.use_aha_learning and
+            is_training and hasattr(self, 'aha_budget_remaining') and
             self.aha_budget_remaining > 0 and current_move > 5):
-            
+
             return self.select_move_with_aha_learning(
-                board, training_progress, is_training, 
+                board, effective_progress, is_training,
                 self.aha_budget_remaining, self.aha_threshold
             )
-        
-        # Regular MCTS move selection
-        return self._get_mcts_move(board, training_progress, current_move, max_moves)                
+
+        # Regular MCTS move selection (temperature drives difficulty at inference)
+        return self._get_mcts_move(board, effective_progress, current_move, max_moves,
+                                   temperature=temperature, iterations=iterations)
 
     # In OptimizedChessAI class
     def get_best_move(self, training_progress=0.0, is_training=False):

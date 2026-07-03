@@ -178,3 +178,18 @@ training_plots/final_game_scores.png
 training_plots/latest_game_progression.png
 training_plots/move_counts.png
 training_plots/training_progress.png
+scratch/
+
+# --- Release artifact policy (Lean): heavy / regenerable / third-party, not committed ---
+# Third-party engine (Stockfish source, binary, zip) — fetched, not source of this repo
+engines/
+# Generated training data (distillation jsonl + shards) — rebuilt by the pipeline
+data/
+# Local human game saves
+saved_games/
+# Heavy / regenerable model artifacts (rebuild via train_*.py / distill_sf.py)
+models/encoded.pt
+models/*.backup.pth
+models/tower.pth
+models/gbdt.json
+models/gbdt_residual.json
