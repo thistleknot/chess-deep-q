@@ -193,3 +193,4 @@ models/*.backup.pth
 models/tower.pth
 models/gbdt.json
 models/gbdt_residual.json
+training_plots/monitoring.png
