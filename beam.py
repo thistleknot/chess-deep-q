@@ -83,6 +83,8 @@ class NetBeam:
         self.widths = tuple(widths)
         self.pair_k, self.tau, self.eps = pair_k, tau, eps
         self.calls = 0
+        self.last_margin = 0.0   # :Move-margin: = max - mean(finalists); decisiveness (>= 0)
+        self.last_value = 0.0    # root-perspective backed-up value acted on (for cross-move :Delta:)
 
     @torch.no_grad()
     def _eval_batch(self, boards):
@@ -182,10 +184,17 @@ class NetBeam:
         lines = [_Line(b, m, self._root_persp(v, rt), p, _terminal_white(b) is not None)
                  for m, b, v, p in zip(top, boards, wv, pr)]
 
+        finalists = lines
         for i, w in enumerate(self.widths[1:]):
             lines = self._prune(lines, w)
+            if len(lines) > 1:
+                finalists = lines          # last top_k (>1) survivor set, for :Move-margin:
             last = (i == len(self.widths) - 2)
             if not last:
                 self._fan_out(lines, rt)
-        lines = self._prune(lines, 1)
-        return lines[0].root_move
+        # :Root-commit: — argmax over root backed-up values (not a temperature pick); exploration is
+        # upstream. :Move-margin: over the finalists; last_value feeds cross-move :Delta:.
+        best = max(finalists, key=lambda l: l.value)
+        self.last_margin = best.value - sum(l.value for l in finalists) / len(finalists)
+        self.last_value = best.value
+        return best.root_move

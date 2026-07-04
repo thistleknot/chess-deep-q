@@ -677,13 +677,14 @@ class FibonacciBeamSampler:
         return picked
 
     # -- entry ---------------------------------------------------------------
-    def select(self, root: chess.Board, net, eps: float, greedy: bool = False) -> chess.Move:
+    def select(self, root: chess.Board, net, eps: float) -> chess.Move:
         """Run the beam. Require: root has legal moves.
         Guarantee: returned move is legal at root.
 
-        greedy=True applies :Decision-rule: (play the argmax ROOT backed-up value) for eval/rating;
-        greedy=False keeps the exploratory temperature pick for self-play. Either way it stores
-        :Move-margin: and the acted-on value on the sampler (last_margin / last_value)."""
+        :Root-commit: (spec/search-mcts.spec.md) — the final pick is ALWAYS argmax over root backed-up
+        values; exploration lives UPSTREAM (uniform fetch, temperature/MMR survival, and the
+        ε-mixture's direct-π branch), so max at the root does not starve on-policy data. Stores
+        :Move-margin: (last_margin) and the acted-on value (last_value, for cross-move :Delta:)."""
         legal = list(root.legal_moves)
         assert legal, "beam called on terminal board"
         if len(legal) == 1:
@@ -716,12 +717,11 @@ class FibonacciBeamSampler:
         best = max(finalists, key=lambda l: l.value)
         self.last_margin = best.value - sum(l.value for l in finalists) / len(finalists)
         self.last_value = best.value
-        # :Decision-rule:: eval plays argmax backed-up value; self-play samples for exploration.
-        # (Sampled backups are optimistic when a refutation was unsampled; the next search's signed
-        # :Delta: corrects it -- see :Search-window-reuse:.)
-        chosen = best if greedy else (self._prune(lines, 1)[0] if len(lines) > 1 else lines[0])
-        assert chosen.root_move in root.legal_moves
-        return chosen.root_move
+        # :Root-commit:: play argmax backed-up value (τ→0 at the terminal level). Sampled backups are
+        # optimistic when a refutation was unsampled; the next volley's signed :Delta: corrects it
+        # (:Search-window-reuse:). Upstream fetch/prune + the ε-mixture π branch supply exploration.
+        assert best.root_move in root.legal_moves
+        return best.root_move
 
 
 # ----------------------------------------------------------------------------
@@ -986,7 +986,7 @@ class Trainer:
         agent *with* search — how Leela-style ratings are quoted).
         Require: board not terminal."""
         if use_beam:
-            return self.behavior.sampler.select(board, self.net, 0.0, greedy=True)
+            return self.behavior.sampler.select(board, self.net, 0.0)
         mask = index_legal_mask(board)
         x = board_to_tensor(board).unsqueeze(0).to(DEVICE)
         logits, _ = self.net(x)
