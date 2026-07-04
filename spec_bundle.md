@@ -7,8 +7,9 @@ Spec-driven development: this is the authoritative source of truth; code traces 
 **Where the implementation actually is (measured, honest):**
 - Learned net currently ~920 Elo vs a real Stockfish anchor (SF 18; UCI_Elo floor 1320). It is
   *undertrained*, not broken — see blocker 1.
-- The repo's pure-Python alpha-beta engine measures ~1720 (beat SF@1320 4-0 at 0.3s/move). It is
-  the baseline + a candidate teacher, not the learned model.
+- The repo's pure-Python alpha-beta engine (hand eval): n=30 with CIs, pst measures ~1428 at a real
+  0.3s/move [CI 1306-1584] and ~1672 at fixed-depth-3 (unbounded time). The old "4-0 -> ~1720" was
+  n=4 noise. It is the baseline + a candidate teacher, not the learned model.
 - Only Stage 1 (Stockfish distillation) has run. Stage 2/3 (λ-return refinement, self-play) are
   authored in spec but gated behind an unmet 1200-Elo gate and have not executed.
 
@@ -21,10 +22,14 @@ dynamic-difficulty + elo-measurement).
    2048 on a Max-Q laptop GPU (superlinear — thermal/throttle). A 200 s train phase buys tens of
    gradient steps, not thousands. Is a residual tower the wrong net for this hardware? CPU training
    (batched CPU hit ~18k samples/s for the tiny net), a smaller net, or gradient accumulation?
-2. **Search ceiling.** Even a decently-distilled eval + depth-2/3 batched net-minimax lost 0/4 to
-   SF@1320. A good eval alone doesn't clear the floor. Does 2600+ require abandoning shallow
-   net-minimax for deep alpha-beta with a fast NN eval, or large-playout MCTS? Is *search*, not the
-   net, the binding constraint?
+2. **Search ceiling. ANSWERED (n=30, this iteration): search depth reached within the time budget
+   dominates.** At a fixed 0.3s/move the evals rank strictly by per-node SPEED, not accuracy:
+   pst 1428 >> linear 1200 > gbdt 735 >> hybrid(pst+residual) -280 (0/30) — anything that slows the
+   per-node eval collapses search depth and strength. The learned leaf value is a dead end here; the
+   fast smooth hand eval searched deeper wins. Using the net as a move-ordering PRIOR orders ~8%
+   fewer nodes at ply<=1 but costs ~9.6ms/call (112% of a 0.3s budget) -> not repaid at time control
+   until a cheaper policy exists. So: *search*, not the net, is the binding constraint on this
+   hardware; the net earns its place only as a cheap ordering/window signal, not a leaf eval.
 3. **Teacher & data.** To exceed 1720 toward 2600+, Stockfish must be the teacher (the 1720 engine
    caps too low). Distill SF eval + best move (dense, low-variance signal) vs learn from SF
    self-play games (in-distribution, outcome-grounded) vs both? Teacher depth vs data volume under
@@ -169,6 +174,7 @@ description: 'Measured strength against a real Stockfish anchor — the honest p
 - :Elo-gate: is a strength threshold (1200, then 1600, then teacher-strength) that must be cleared by :Measured-elo: before annealing progress or a training-stage transition may advance past it.
 - :Measurement-game: is a game played purely for measurement: every training-time noise source (root Dirichlet noise, move temperature, shaped reward) is off and the agent plays argmax.
 - :Measurement-power: is the requirement that GAMES_PER_MEASUREMENT be large enough that the 95% confidence interval on :Measured-elo: is NARROWER than the :Elo-gate: step it must resolve. The per-game score SD is √(p(1−p)/n); at n=6 it is ~0.13 — wider than the gap between adjacent strength levels — so gate decisions at n=6 are coin flips and any single-lever conclusion drawn from them is unfounded. Adequate power is ~30–50 games at a fast time control (games are cheap relative to a labeling grind).
+- :Compute-frontier: is the score-vs-compute selection rule for a sampled search config. The beam's deterministic leaf-eval count (total_calls) is the compute axis — linear in wall-time when ops are homogeneous; the frontier plots :Measured-elo: D against it. The zero-search baseline (rfr — argmax :Policy-head:, or random before a policy exists) anchors it, and a config's ADVANTAGE is its PAIRED excess over the rfr on a fixed color-balanced opening suite (common random numbers → the shared opening/colour/anchor noise cancels, so Var(advantage) ≪ Var(D)). Sharpe = advantage / sec-per-move (measured wall-time is the real denominator; advantage / total_calls is the hardware-independent proxy, faithful only for homogeneous ops). The :Run-contract: picks the Pareto-frontier config with the best D whose total_calls fits the budget; the tangency (max Sharpe from the rfr) is the best score-per-compute point.
 
 ***implementation reqs***
 
@@ -178,7 +184,7 @@ description: 'Measured strength against a real Stockfish anchor — the honest p
 
 ***test reqs***
 
-- The harness must reproduce a known-strong engine's superiority over the anchor: `engine.py` (measured ~1720; beat SF@1320 4-0 at 0.3s/move) must score decisively above 0.5 vs SF@1320.
+- The harness must reproduce a known-strong engine's superiority over the anchor: `engine.py`'s hand-eval alpha-beta must score decisively above 0.5 vs SF@1320. (Honest numbers, n=30 with CIs: the older "4-0 → ~1720 at 0.3s/move" was n=4 noise; at a real 0.3s budget pst measures ~1428 [CI 1306–1584], while fixed-depth-3 unbounded-time measures ~1672. Small-n superlatives are forbidden by :Measurement-power:.)
 
 ***functional specs***
 
@@ -441,6 +447,10 @@ import:
 - :Search-value: is the negamax-backed value estimate at a node after its backups — the value the search already computed to select a move. It is exposed in the :White-absolute-frame: so the value-target stage can bootstrap from it for free (no extra inference), and is the improved on-policy value that makes the value target off-policy-safe (tree-backup).
 - :Quiescence-search: is the requirement that the net-minimax profile evaluates a leaf ONLY at a quiet position: at a fixed-depth frontier that is non-quiet (mid-capture sequence, hanging piece, in check), the search extends captures (and checks) until quiet before applying the value net. Without it, fixed-depth-2 hands the net non-quiet positions where any static eval is noise — the horizon effect that, not eval quality, caps net-minimax below a quiescence-equipped alpha-beta of *worse* eval. The primary profile also needs the standard stack: iterative deepening, a transposition table, and move ordering.
 - :Policy-move-ordering: is the consumer of the :Policy-head: inside the net-minimax profile (minimax does not otherwise read P): the policy distribution orders moves for search and selects the beam. This closes a dead-weight defect (the policy head would otherwise be unused in the primary profile) and makes cloning self-reinforcing — a better policy yields better ordering, hence deeper effective search, hence better cloning targets.
+- :Search-window-reuse: is the receding-horizon carry of the scored sampled subtree across moves: after the played move and the opponent's reply, the surviving subtree is kept as a warm start, the window shifts by the resolved plies, and one fresh fetch_k frontier layer is added — so effective horizon accumulates across moves at constant per-move budget, densifying the sparse sample along the played line. It is LEAKY: only the subtree under the opponent's ACTUAL reply survives, so a reply outside the sampled top_k re-seeds (the ponder-miss); policy-guided fetch reuses more than random fetch. The realized advantage :Delta: = (a move's backed-up value after the deeper re-search) − (its value estimated when it was selected) is the SIGNED TD error (unlike the non-negative :Move-margin:), and is exactly the :Search-value: the value-target stage bootstraps from — one search yields the move, the margin, and the training target.
+- :Phi-rotation: is scheduled iterative deepening over the Fibonacci widths: each pass shifts one phi-step of width into one phi-step of depth, per layer, gated on that layer's top_k ORDERING being unchanged across the last two passes (unstable ordering ⇒ the layer is unsaturated ⇒ hold its width). Stability is NECESSARY, NOT SUFFICIENT — two jointly-too-shallow passes can agree yet be wrong; that error is corrected later by :Delta:, so premature deepening is bounded-lag, not permanent. Narrowing applies to EXPANSION ONLY, never RETENTION: scored candidates stay in the table (root-layer candidates indefinitely — bounded and cheap, they are the decision; deeper shelved siblings under a recency/decay eviction, being re-derivable), and narrowing only stops spending fan-out outside the shrunk top_k. If the incumbent line's backed-up value drops between passes (:Delta: < 0), the shelved siblings are re-opened at the shallowest divergent layer — aspiration-window fail-low re-search — so the rotation is not a one-way ratchet into a refuted line. (Together with :Search-window-reuse: this re-derives iterative deepening + aspiration windows + transposition retention for the sampled beam.)
+- :Decision-rule: is that the played move is the argmax over ROOT MOVES of their backed-up (alternating max/min) value; raw comparison of leaf scores ACROSS DEPTHS is FORBIDDEN — an interior leaf-eval is superseded by its subtree's backup, and a high value sitting behind an opponent refutation is unreachable. In a sampled beam these backed-up values are sample-OPTIMISTIC (an unsampled opponent refutation inflates the alternating max/min): correct as the target, biased high until :Search-window-reuse: densifies and the :Delta: < 0 re-widening of :Phi-rotation: refutes — so :Decision-rule: and that re-widening are one anti-optimism loop.
+- :Move-margin: is max − mean(top_k) over the surviving lines' root-perspective backed-up values — the DECISIVENESS of the winner over the field it beat (always ≥ 0, distinct from the signed :Delta:). It calibrates compute and difficulty: margin ≥ θ_easy for two consecutive passes terminates deepening early (easy-move detection) and marks the position as safe for :Strength-temperature: sampling; a low margin marks the position as ambiguous — exactly where deepening compute (and honest play) belong.
 
 ***implementation reqs***
 
@@ -448,12 +458,14 @@ import:
 - Constant: MIN_ROOT_VISITS — the visits-per-child threshold of the :Root-selection-rule:.
 - :Gated-progress: must be threaded to the leaf evaluation, not stopped at the search entry point.
 - `net_search.py` (batched fixed-depth minimax with beam pruning, ~0.9 s/move at depth 2) is the interim conformant fast profile until PUCT lands.
+- The alternating max/min fold is implemented as ONE sign trick — a parent takes `max over −child` in the side-to-move frame — so after an even ply count the value is back in root perspective. Its two code sites are the `(−1)^k` alternation in the n-step returns and the `mover_val = -v` negamax commit in the beam fan-out; both trace to :Negamax-backup-convention:.
 
 ***test reqs***
 
 - The historical failing position — opponent has just left a queen en prise (e.g. `rnb1kbnr/pppppppp/8/3q4/4P3/8/PPPP1PPP/RNBQKBNR w`) — with a ~200-simulation budget, to assert the :Root-selection-rule:.
 - A mirror pair of positions backed up through alternating plies, to assert the :Negamax-backup-convention: for both colors.
 - A midgame position plus a stub network returning a fixed value, to assert the leaf blend endpoints.
+- A TRAP position where a move wins material immediately but loses it to a forced reply (poisoned pawn / trapped queen, the Qxb7-behind-...Rb8 shape): its eval right after the capture is positive but its backed-up value is negative. Assert (a) :Decision-rule: DECLINES it — the move backs up to the min over the opponent's replies (not the best leaf in its subtree), so the quiet alternative is played; and (b) a beam whose pair_k is below the refutation's policy rank backs the trap up OPTIMISTICALLY (the pre-capture positive value), pinning the sample-optimism bias, which the next move's :Search-window-reuse: :Delta: < 0 corrects.
 
 ***functional specs***
 
@@ -482,6 +494,19 @@ import:
   - Given the policy distribution P at a node, When moves are ordered/pruned for search, Then ordering and beam selection follow P (better P → better ordering → deeper effective search → better cloning targets).
 - The batching/pruning tension must be acknowledged, not assumed away.
   - :Batched-leaf-evaluation: (parallel frontiers) and deep alpha-beta pruning (sequential) pull opposite ways; the beam-pruned batched minimax is a deliberate middle path. Depth targets MUST NOT be specified assuming true alpha-beta branching factors — expect weaker pruning than incremental-update CPU NNUE.
+- :Decision-rule: must select over root backed-up values, never raw cross-depth scores.
+  - Given leaf values at different depths, When the root move is chosen, Then selection is argmax over ROOT moves' alternating-max/min backed-up values; a raw leaf score is never compared to one at a different depth.
+  - Given a root move whose high value stands behind an opponent refutation in the beam, Then that value MUST be backed up (min at the opponent ply) before the move is eligible.
+  - Given a move, When its value is formed, Then it is the leaf value at the END of its principal variation, folded up one ply at a time by alternating max (the mover) / min (the opponent) — equivalently `max over −child` in the side-to-move frame — and the position's eval IMMEDIATELY AFTER the move is superseded the instant the move is expanded. The best raw leaf anywhere in the subtree is NOT the value: every deep score is gated by the opponent's min nodes between the root and it (raw max over all leaves assumes the opponent cooperates). Worked fold — White to move, Qxb7 (eval +1.0 right after the capture) vs Nf3: after Qxb7 ...Rb8 traps the queen, White's deepest choice max(−7.0,−7.5)=−7.0, Black's node min(−7.0,+1.0)=−7.0, so Qxb7 backs up to −7.0 (the +1.0 is overwritten); Nf3 backs up to +0.2; argmax(−7.0,+0.2) ⇒ play Nf3.
+- :Phi-rotation: must narrow expansion without discarding scored candidates, and self-correct on :Delta: < 0.
+  - Given a layer narrowed at an earlier pass, When a later pass needs a shelved sibling, Then it is still in the table (root-layer indefinitely, deeper siblings under decay) and re-openable — narrowing stopped fan-out, not retention.
+  - Given the incumbent line's backed-up value drops between passes (:Delta: < 0), Then the shelved siblings at the shallowest divergent layer are re-opened (aspiration fail-low re-search).
+  - Given a layer's top_k ordering changed across the last two passes, Then its width is held, not rotated into depth.
+- :Move-margin: must gate early termination of deepening.
+  - Given :Move-margin: ≥ θ_easy for two consecutive passes, Then deepening terminates early for that move (easy-move detection); Given a low margin, Then deepening continues (the compute belongs there).
+- :Search-window-reuse: must carry the subtree and expose :Delta:.
+  - Given the opponent's reply lies in the retained subtree, Then it is reused as a warm start and only a fresh frontier layer is expanded; Given the reply lies outside the sampled top_k, Then the window re-seeds (ponder-miss).
+  - Given a move's deeper re-search completes, Then :Delta: = (new backed-up value) − (prior selection estimate) is exposed as the :Search-value: the value-target bootstraps from.
 - The search must expose its :Search-value: alongside the chosen move and visit distribution, in the :White-absolute-frame:, so the value-target stage can bootstrap from it.
   - Given a completed search at a node, Then the negamax-backed node value is available to the caller without re-running inference.
 
@@ -622,6 +647,8 @@ import:
 - :Teacher-agreement: is the fraction of moves in a game where the played move equals the operative :Prior-lineage: member's greedy move — a lock-in / derivative-play signal that should fall as the learner outgrows its prior. (Generalizes the earlier prior-agreement metric.)
 - :Opening-diversity: is the count of distinct first moves seen across recent games — a policy-collapse signal that should stay above one.
 - :Ahead-but-lost: is the count of games the mover led by a wide evaluation margin yet did not win — a reward-hacking signal.
+- :Stop-training: is the three-gate rule for ending a training stage. adv = G − V(s); the baseline drives its mean toward 0, so E[adv²] is Bellman-residual energy — a cheap proxy for critic/policy fit ON THE SELF-PLAY DISTRIBUTION, not strength. Low E[adv²] is FOUR-way ambiguous: nothing left to learn (victory), entropy collapse (the policy stopped visiting surprising states), a frozen distribution, or the critic having memorised/overfit the self-play data — and three of the four mimic convergence. So a stage MUST require ALL of: a robust (median/Huber, mate-spike-resistant — raw MAD is insufficient) EWMA of E[adv²] below θ for K consecutive checkpoints, AND the external :Measured-elo: rung plateaued (the expensive probe that alone catches overfit), AND policy entropy at or above a floor defined so it holds :Opening-diversity: > 1 (rejecting collapse). A DISTINCT stop retires the search arm, not training: when the beam's measured excess over the zero-search policy (:Compute-frontier: advantage vs the bare-policy rfr) reaches 0, search is distilled into the policy and ε may retire.
+- :Value-of-information: is the law unifying every stop/allocate decision in the system — spend compute where estimates still disagree, stop where they have stopped disagreeing. adv-variance measures disagreement across STATES (training), :Search-window-reuse:'s δ across PASSES (per line), :Move-margin: across SIBLINGS (per move), :Phi-rotation:'s ordering-stability across LAYERS (width). One statistic at four scopes; it is the epistemic (uncertainty-reduction) term of expected free energy.
 
 ***implementation reqs***
 
@@ -673,6 +700,12 @@ import:
   - If :Opening-diversity: stays at 1 across many games, Then policy collapse is flagged for the user.
 - :Ahead-but-lost: must be incremented when a side held a wide evaluation lead yet failed to win.
 - Monitoring metrics must be observable: the training-plot step must render :Teacher-agreement:, :Opening-diversity:, and the :Elo-trend: to disk after training.
+- :Stop-training: must require all three gates; any single gate alone MUST NOT stop a stage.
+  - Given robust-EWMA(E[adv²]) < θ for K checkpoints but the rung :Measured-elo: still climbing, Then training continues (the cheap proxy saturated, capability did not).
+  - Given robust-EWMA(E[adv²]) < θ and the rung eval plateaued but policy entropy below its floor (:Opening-diversity: at 1), Then STOP is refused and collapse is flagged — low variance here is collapse, not convergence.
+  - Given all three hold (low robust adv² for K checkpoints, rung plateau, entropy ≥ floor), Then the stage may stop.
+  - Given the beam's :Compute-frontier: advantage over the zero-search policy reaches 0, Then the search/ε arm retires (search distilled into the policy), independently of the training-stop gates.
+- The :Value-of-information: law must be the shared rationale for every allocate/stop decision: compute is spent where estimates still disagree (high adv-variance states, unstable :Phi-rotation: layers, low :Move-margin: moves, :Delta:-divergent lines) and withdrawn where they agree.
 
 
 ================================================================================

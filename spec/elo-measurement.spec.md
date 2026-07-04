@@ -9,6 +9,7 @@ description: 'Measured strength against a real Stockfish anchor — the honest p
 - :Elo-gate: is a strength threshold (1200, then 1600, then teacher-strength) that must be cleared by :Measured-elo: before annealing progress or a training-stage transition may advance past it.
 - :Measurement-game: is a game played purely for measurement: every training-time noise source (root Dirichlet noise, move temperature, shaped reward) is off and the agent plays argmax.
 - :Measurement-power: is the requirement that GAMES_PER_MEASUREMENT be large enough that the 95% confidence interval on :Measured-elo: is NARROWER than the :Elo-gate: step it must resolve. The per-game score SD is √(p(1−p)/n); at n=6 it is ~0.13 — wider than the gap between adjacent strength levels — so gate decisions at n=6 are coin flips and any single-lever conclusion drawn from them is unfounded. Adequate power is ~30–50 games at a fast time control (games are cheap relative to a labeling grind).
+- :Compute-frontier: is the score-vs-compute selection rule for a sampled search config. The beam's deterministic leaf-eval count (total_calls) is the compute axis — linear in wall-time when ops are homogeneous; the frontier plots :Measured-elo: D against it. The zero-search baseline (rfr — argmax :Policy-head:, or random before a policy exists) anchors it, and a config's ADVANTAGE is its PAIRED excess over the rfr on a fixed color-balanced opening suite (common random numbers → the shared opening/colour/anchor noise cancels, so Var(advantage) ≪ Var(D)). Sharpe = advantage / sec-per-move (measured wall-time is the real denominator; advantage / total_calls is the hardware-independent proxy, faithful only for homogeneous ops). The :Run-contract: picks the Pareto-frontier config with the best D whose total_calls fits the budget; the tangency (max Sharpe from the rfr) is the best score-per-compute point.
 
 ***implementation reqs***
 
@@ -18,7 +19,7 @@ description: 'Measured strength against a real Stockfish anchor — the honest p
 
 ***test reqs***
 
-- The harness must reproduce a known-strong engine's superiority over the anchor: `engine.py` (measured ~1720; beat SF@1320 4-0 at 0.3s/move) must score decisively above 0.5 vs SF@1320.
+- The harness must reproduce a known-strong engine's superiority over the anchor: `engine.py`'s hand-eval alpha-beta must score decisively above 0.5 vs SF@1320. (Honest numbers, n=30 with CIs: the older "4-0 → ~1720 at 0.3s/move" was n=4 noise; at a real 0.3s budget pst measures ~1428 [CI 1306–1584], while fixed-depth-3 unbounded-time measures ~1672. Small-n superlatives are forbidden by :Measurement-power:.)
 
 ***functional specs***
 

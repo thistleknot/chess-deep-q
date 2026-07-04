@@ -19,6 +19,8 @@ import:
 - :Teacher-agreement: is the fraction of moves in a game where the played move equals the operative :Prior-lineage: member's greedy move — a lock-in / derivative-play signal that should fall as the learner outgrows its prior. (Generalizes the earlier prior-agreement metric.)
 - :Opening-diversity: is the count of distinct first moves seen across recent games — a policy-collapse signal that should stay above one.
 - :Ahead-but-lost: is the count of games the mover led by a wide evaluation margin yet did not win — a reward-hacking signal.
+- :Stop-training: is the three-gate rule for ending a training stage. adv = G − V(s); the baseline drives its mean toward 0, so E[adv²] is Bellman-residual energy — a cheap proxy for critic/policy fit ON THE SELF-PLAY DISTRIBUTION, not strength. Low E[adv²] is FOUR-way ambiguous: nothing left to learn (victory), entropy collapse (the policy stopped visiting surprising states), a frozen distribution, or the critic having memorised/overfit the self-play data — and three of the four mimic convergence. So a stage MUST require ALL of: a robust (median/Huber, mate-spike-resistant — raw MAD is insufficient) EWMA of E[adv²] below θ for K consecutive checkpoints, AND the external :Measured-elo: rung plateaued (the expensive probe that alone catches overfit), AND policy entropy at or above a floor defined so it holds :Opening-diversity: > 1 (rejecting collapse). A DISTINCT stop retires the search arm, not training: when the beam's measured excess over the zero-search policy (:Compute-frontier: advantage vs the bare-policy rfr) reaches 0, search is distilled into the policy and ε may retire.
+- :Value-of-information: is the law unifying every stop/allocate decision in the system — spend compute where estimates still disagree, stop where they have stopped disagreeing. adv-variance measures disagreement across STATES (training), :Search-window-reuse:'s δ across PASSES (per line), :Move-margin: across SIBLINGS (per move), :Phi-rotation:'s ordering-stability across LAYERS (width). One statistic at four scopes; it is the epistemic (uncertainty-reduction) term of expected free energy.
 
 ***implementation reqs***
 
@@ -70,3 +72,9 @@ import:
   - If :Opening-diversity: stays at 1 across many games, Then policy collapse is flagged for the user.
 - :Ahead-but-lost: must be incremented when a side held a wide evaluation lead yet failed to win.
 - Monitoring metrics must be observable: the training-plot step must render :Teacher-agreement:, :Opening-diversity:, and the :Elo-trend: to disk after training.
+- :Stop-training: must require all three gates; any single gate alone MUST NOT stop a stage.
+  - Given robust-EWMA(E[adv²]) < θ for K checkpoints but the rung :Measured-elo: still climbing, Then training continues (the cheap proxy saturated, capability did not).
+  - Given robust-EWMA(E[adv²]) < θ and the rung eval plateaued but policy entropy below its floor (:Opening-diversity: at 1), Then STOP is refused and collapse is flagged — low variance here is collapse, not convergence.
+  - Given all three hold (low robust adv² for K checkpoints, rung plateau, entropy ≥ floor), Then the stage may stop.
+  - Given the beam's :Compute-frontier: advantage over the zero-search policy reaches 0, Then the search/ε arm retires (search distilled into the policy), independently of the training-stop gates.
+- The :Value-of-information: law must be the shared rationale for every allocate/stop decision: compute is spent where estimates still disagree (high adv-variance states, unstable :Phi-rotation: layers, low :Move-margin: moves, :Delta:-divergent lines) and withdrawn where they agree.

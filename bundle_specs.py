@@ -17,8 +17,9 @@ REVIEWER_CONTEXT = """## For reviewers — live decisions & open questions
 **Where the implementation actually is (measured, honest):**
 - Learned net currently ~920 Elo vs a real Stockfish anchor (SF 18; UCI_Elo floor 1320). It is
   *undertrained*, not broken — see blocker 1.
-- The repo's pure-Python alpha-beta engine measures ~1720 (beat SF@1320 4-0 at 0.3s/move). It is
-  the baseline + a candidate teacher, not the learned model.
+- The repo's pure-Python alpha-beta engine (hand eval): n=30 with CIs, pst measures ~1428 at a real
+  0.3s/move [CI 1306-1584] and ~1672 at fixed-depth-3 (unbounded time). The old "4-0 -> ~1720" was
+  n=4 noise. It is the baseline + a candidate teacher, not the learned model.
 - Only Stage 1 (Stockfish distillation) has run. Stage 2/3 (λ-return refinement, self-play) are
   authored in spec but gated behind an unmet 1200-Elo gate and have not executed.
 
@@ -31,10 +32,14 @@ dynamic-difficulty + elo-measurement).
    2048 on a Max-Q laptop GPU (superlinear — thermal/throttle). A 200 s train phase buys tens of
    gradient steps, not thousands. Is a residual tower the wrong net for this hardware? CPU training
    (batched CPU hit ~18k samples/s for the tiny net), a smaller net, or gradient accumulation?
-2. **Search ceiling.** Even a decently-distilled eval + depth-2/3 batched net-minimax lost 0/4 to
-   SF@1320. A good eval alone doesn't clear the floor. Does 2600+ require abandoning shallow
-   net-minimax for deep alpha-beta with a fast NN eval, or large-playout MCTS? Is *search*, not the
-   net, the binding constraint?
+2. **Search ceiling. ANSWERED (n=30, this iteration): search depth reached within the time budget
+   dominates.** At a fixed 0.3s/move the evals rank strictly by per-node SPEED, not accuracy:
+   pst 1428 >> linear 1200 > gbdt 735 >> hybrid(pst+residual) -280 (0/30) — anything that slows the
+   per-node eval collapses search depth and strength. The learned leaf value is a dead end here; the
+   fast smooth hand eval searched deeper wins. Using the net as a move-ordering PRIOR orders ~8%
+   fewer nodes at ply<=1 but costs ~9.6ms/call (112% of a 0.3s budget) -> not repaid at time control
+   until a cheaper policy exists. So: *search*, not the net, is the binding constraint on this
+   hardware; the net earns its place only as a cheap ordering/window signal, not a leaf eval.
 3. **Teacher & data.** To exceed 1720 toward 2600+, Stockfish must be the teacher (the 1720 engine
    caps too low). Distill SF eval + best move (dense, low-variance signal) vs learn from SF
    self-play games (in-distribution, outcome-grounded) vs both? Teacher depth vs data volume under
