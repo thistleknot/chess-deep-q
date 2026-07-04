@@ -229,6 +229,89 @@ def fast_evaluate_position(board, ignore_checkmate=False):
     return eval_score
 
 
+def evaluate_by_player(board):
+    """
+    Break the position down into per-player material and positional scores.
+
+    Returns a dict:
+        {'white': {'material': m, 'position': p, 'total': m + p},
+         'black': {...}}
+
+    The components use the same weights as fast_evaluate_position, so
+    white['total'] - black['total'] matches that function's positional +
+    material terms (it omits only the turn-dependent check bonus). This lets
+    the UI show each side's piece value and board-position value side by side.
+    """
+    result = {}
+    for color in (chess.WHITE, chess.BLACK):
+        opponent = not color
+
+        # --- Material: summed piece values ---
+        material = sum(len(board.pieces(pt, color)) * val
+                       for pt, val in PIECE_VALUES.items())
+
+        # --- Mobility: legal moves available to this side ---
+        mob_board = board.copy()
+        mob_board.turn = color
+        mobility = len(list(mob_board.legal_moves))
+        mobility_pos = mobility * 0.1 * 0.3
+
+        # --- Square control: squares this side attacks ---
+        attacked = sum(1 for sq in chess.SQUARES if board.is_attacked_by(color, sq))
+        control_pos = attacked * 0.05 * 0.3
+
+        # --- King safety: attackers on own king, castling, central exposure ---
+        king_square = board.king(color)
+        king_attackers = 0
+        if king_square is not None and board.is_attacked_by(opponent, king_square):
+            # Match fast_evaluate's (odd) tally: one count per enemy piece.
+            king_attackers = sum(1 for sq in chess.SQUARES
+                                 if (p := board.piece_at(sq)) and p.color == opponent)
+        castled_squares = [chess.G1, chess.C1] if color == chess.WHITE else [chess.G8, chess.C8]
+        center_squares = [chess.D4, chess.E4, chess.D5, chess.E5]
+        king_raw = -king_attackers * 0.5
+        if king_square in castled_squares:
+            king_raw += 1
+        if king_square in center_squares:
+            king_raw -= 2
+        king_safety_pos = king_raw * 0.5
+
+        # --- Pawn structure: penalties for doubled and isolated pawns ---
+        pawns = list(board.pieces(chess.PAWN, color))
+        pawn_files = [chess.square_file(sq) for sq in pawns]
+        doubled = sum(pawn_files.count(f) - 1 for f in set(pawn_files))
+        isolated = sum(1 for pawn in pawns
+                       if not any(chess.square_file(p) in (chess.square_file(pawn) - 1,
+                                                           chess.square_file(pawn) + 1)
+                                  for p in pawns))
+        pawn_pos = (-doubled * 0.3 - isolated * 0.2) * 0.4
+
+        # --- Space: central and extended-center squares attacked ---
+        center = [chess.D4, chess.D5, chess.E4, chess.E5]
+        extended = [chess.C3, chess.C4, chess.C5, chess.C6, chess.D3, chess.D6,
+                    chess.E3, chess.E6, chess.F3, chess.F4, chess.F5, chess.F6]
+        center_ctrl = sum(1 for sq in center if board.is_attacked_by(color, sq))
+        ext_ctrl = sum(1 for sq in extended if board.is_attacked_by(color, sq))
+        space_pos = (center_ctrl * 0.5 + ext_ctrl * 0.1) * 0.3
+
+        # --- Coordination: own pieces defended by own pieces ---
+        defended = sum(1 for sq in chess.SQUARES
+                       if (p := board.piece_at(sq)) and p.color == color
+                       and board.is_attacked_by(color, sq))
+        coordination_pos = defended * 0.1 * 0.4
+
+        position = (mobility_pos + control_pos + king_safety_pos
+                    + pawn_pos + space_pos + coordination_pos)
+
+        result['white' if color == chess.WHITE else 'black'] = {
+            'material': material,
+            'position': position,
+            'total': material + position,
+        }
+
+    return result
+
+
 def categorize_moves(board):
     """
     Categorize moves by tactical significance and assign sampling weights.

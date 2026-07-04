@@ -1,0 +1,3 @@
+{"rows": 49098, "added": 16268, "val_mse": 0.5882, "sign_acc": 0.617, "score": 0.0, "elo": 920, "label_s": 45.0, "train_s": 210.0, "core_wall_s": 2835}
+{"rows": 49098, "added": 0, "val_mse": 0.4787, "sign_acc": 0.648, "score": 0.0, "elo": 920, "label_s": 40.0, "train_s": 200.0, "core_wall_s": 264}
+{"rows": 49098, "added": 0, "val_mse": 0.1596, "sign_acc": 0.832, "score": 0.16666666666666666, "elo": 1040, "label_s": 20.0, "train_s": 300.0, "core_wall_s": 340}

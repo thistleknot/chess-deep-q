@@ -1,0 +1,23 @@
+{
+  "anchor_elo": 1200,
+  "anchor_measured": false,
+  "approximate": false,
+  "table": {
+    "0.0": {
+      "elo_gap": 0.0,
+      "avg_regret": 0.0
+    },
+    "0.4": {
+      "elo_gap": 34.86007028756008,
+      "avg_regret": -0.021173176703843742
+    },
+    "0.8": {
+      "elo_gap": 34.86007028756008,
+      "avg_regret": -0.020900204132254702
+    },
+    "1.5": {
+      "elo_gap": 34.86007028756008,
+      "avg_regret": -0.018594077825611167
+    }
+  }
+}

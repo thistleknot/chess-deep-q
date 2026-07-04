@@ -169,7 +169,7 @@ def main():
         
         # Display welcome message
         print("\n" + "="*78)
-        print(" "*20 + "Chess AI with Deep Q-Learning and MCTS" + " "*20)
+        print(" "*18 + "Chess-RL — net+PUCT self-play (AlphaStar-hybrid)" + " "*18)
         print("="*78 + "\n")
         
         # Start the application

@@ -3,8 +3,10 @@ import colorama
 import os
 import time
 from colorama import Fore, Back, Style
-from evaluation import fast_evaluate_position, find_threatened_squares, find_guarded_squares
+from evaluation import (fast_evaluate_position, find_threatened_squares,
+                        find_guarded_squares, evaluate_by_player)
 from board_utils import get_legal_moves_from_square, get_secondary_moves, get_move_uci
+from difficulty import DifficultyController
 
 # Initialize colorama for cross-platform terminal colors
 colorama.init()
@@ -21,6 +23,57 @@ class TerminalChessBoard:
         self.move_history = []
         self.board_history = [board.copy()]
         self.highlighted_hint = None
+
+        # Dynamic difficulty controller (off unless enabled). Scores moves with the learned
+        # policy and adjusts the AI's move-selection temperature toward the player's skill band.
+        self.difficulty_controller = DifficultyController(
+            value_fn=self._policy_value,
+            best_move_fn=self._policy_best_move,
+        )
+        # Apply any difficulty settings the user chose in the menu (persisted on the AI).
+        settings = getattr(ai, 'difficulty_settings', None)
+        if settings:
+            self.difficulty_controller.enabled = settings.get('enabled', self.difficulty_controller.enabled)
+            self.difficulty_controller.mode = settings.get('mode', self.difficulty_controller.mode)
+            self.difficulty_controller.fixed_temperature = settings.get(
+                'fixed_temperature', self.difficulty_controller.fixed_temperature)
+            self.difficulty_controller.offset = settings.get('offset', self.difficulty_controller.offset)
+            self.difficulty_controller.reset()   # apply mode (fixed sets the starting temperature)
+
+        # ELO calibrator (temperature/regret -> ELO), if one was loaded onto the AI.
+        self.elo_calibrator = getattr(ai, 'elo_calibrator', None)
+
+    def _difficulty_status_line(self):
+        """One-line ELO readout while dynamic difficulty is active (estimates)."""
+        ctrl = self.difficulty_controller
+        cal = self.elo_calibrator
+        if not ctrl.enabled or cal is None or not cal.is_calibrated():
+            return None
+        opp = cal.policy_elo(ctrl.temperature)
+        you = cal.player_elo(ctrl.player_mean)
+        anchor = "measured" if cal.anchor_measured else "assumed"
+        approx = "approx curve" if getattr(cal, "approximate", False) else "calibrated"
+        parts = []
+        if opp is not None:
+            parts.append(f"Opponent ≈ {opp:.0f} ELO")
+        if you is not None:
+            parts.append(f"your play ≈ {you:.0f} ELO")
+        if not parts:
+            return None
+        return f"[difficulty] {' | '.join(parts)} ({approx}; anchor {anchor})"
+
+    def _policy_value(self, board):
+        """Learned value (White-absolute, [-1,1]) of a position; feeds difficulty regret."""
+        return self.ai.dqn_agent.get_q_value(board)
+
+    def _policy_best_move(self, board):
+        """The policy's strongest (argmax) move for a position, used to score a player's move."""
+        saved_board = self.ai.board
+        self.ai.board = board.copy()
+        try:
+            return self.ai.get_best_move()  # temperature 0 => argmax
+        finally:
+            self.ai.board = saved_board
         
     def clear_screen(self):
         """Clear the terminal screen"""
@@ -122,6 +175,19 @@ class TerminalChessBoard:
         eval_prefix = "+" if evaluation > 0 else ""
         
         print(f"\n{turn} to move | Eval: {eval_prefix}{evaluation:.2f}")
+
+        # Per-player breakdown: piece (material) value and board-position value.
+        scores = evaluate_by_player(self.board)
+        w, b = scores['white'], scores['black']
+        print(f"  {'':7}{'Pieces':>8} {'Position':>9} {'Total':>8}")
+        print(f"  {'White':7}{w['material']:>8.1f} {w['position']:>9.2f} {w['total']:>8.2f}")
+        print(f"  {'Black':7}{b['material']:>8.1f} {b['position']:>9.2f} {b['total']:>8.2f}")
+
+        # Estimated ELO of the opponent and of your play, shown every turn when an
+        # adjusting/fixed opponent is active (uses the approximate curve until calibrated).
+        status = self._difficulty_status_line()
+        if status:
+            print(status)
         print("  " + "-" * 17)  # Adjusted for proper alignment
         
         # Unicode chess pieces
@@ -184,8 +250,9 @@ class TerminalChessBoard:
         print(f"{Back.RED}   {Style.RESET_ALL} Threatened only")
         print(f"{Back.CYAN}   {Style.RESET_ALL} Guarded only")
         
-        # Available commands
-        print("\nCommands: 'hint', 'undo', 'save', 'load', 'resign', 'cancel', or enter move (e.g., e2e4)")
+        # Available commands (single-letter shortcuts in brackets)
+        print("\nCommands: '(h)int', '(u)ndo', '(s)ave', '(l)oad', '(r)esign', '(c)ancel', "
+              "or enter move (e.g., e2e4)")
         
         # Show current selection info if any
         if self.selected_square is not None:
@@ -253,23 +320,24 @@ class TerminalChessBoard:
         parts = user_input.lower().strip().split()
         command = parts[0] if parts else ""
         
-        # Handle commands
-        if command == 'hint':
+        # Handle commands. Each accepts its full word or its first-letter shortcut
+        # (h/u/s/l/r/c); single letters never collide with moves, which are 2 or 4 chars.
+        if command in ('hint', 'h'):
             self.show_move_hint()
             return False
-        elif command == 'undo':
+        elif command in ('undo', 'u'):
             self.undo_move()
             return False
-        elif command == 'save':
+        elif command in ('save', 's'):
             self.save_game()
             return False
-        elif command == 'load':
+        elif command in ('load', 'l'):
             self.prompt_load_game()
             return False
-        elif command == 'resign':
+        elif command in ('resign', 'r'):
             print("You resigned the game.")
             return True  # Signal game over
-        elif command == 'cancel':
+        elif command in ('cancel', 'c'):
             self.selected_square = None
             self.possible_moves = set()
             self.secondary_moves = set()
@@ -379,17 +447,28 @@ class TerminalChessBoard:
         if self.board.turn != self.human_color:
             print("AI is thinking...")
             start_time = time.time()
-            
+
+            # Difficulty: pick the strength temperature for this move (0 = strongest/argmax).
+            temperature = self.difficulty_controller.next_temperature()
+
             # Get AI's move
-            self.ai.board = self.board.copy()  # Make sure AI has current board
-            move = self.ai.get_best_move()
-            
+            state_before = self.board.copy()
+            self.ai.board = state_before.copy()  # Make sure AI has current board
+            move = self.ai.get_best_move(temperature=temperature)
+
             end_time = time.time()
             print(f"AI plays: {move.uci()} (took {end_time - start_time:.2f}s)")
-            
+
+            # Feed the AI's realized regret back to the controller (best move came free from the
+            # same search via last_root_best), nudging temperature toward the player's band.
+            self.difficulty_controller.observe_ai_move(
+                state_before, move, self.ai.dqn_agent.last_root_best)
+
+            # (The estimated-ELO readout is rendered every turn in display_board's header.)
+
             # Save board state before AI move
             self.board_history.append(self.board.copy())
-            
+
             # Update the board
             self.board.push(move)
             self.last_move = move
@@ -555,6 +634,13 @@ class TerminalChessBoard:
             
             # If a move was made, let AI respond
             if move_made:
+                # Difficulty: score the human's move against the policy before the AI replies.
+                # board_history[-1] is the position before this human move; last_move is the move.
+                if self.difficulty_controller.enabled and self.last_move is not None \
+                        and self.board_history:
+                    self.difficulty_controller.observe_player_move(
+                        self.board_history[-1], self.last_move)
+
                 # AI makes its move
                 self.make_ai_move()
                 
