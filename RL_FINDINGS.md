@@ -47,6 +47,18 @@ is still weak; the search does the defending.)
 - **Deliverable shipped:** `play_puct.py` / menu option 20 — the net+PUCT RL agent, playable. The
   classical engine (option 18) is the labeled non-RL baseline.
 
+## Coda — linear value RL (TD-Gammon-style, S&B ch9)
+
+Sixth config, added to test the *efficient* path (µs linear eval, multiprocessing self-play, minutes
+not hours): V(s)=wᵀφ(s) over hand features, RL-tuned by gradient-MC on self-play outcomes (S&B §9.5).
+The value **fit converged cleanly** (VE mse 0.78→0.12 — the linear single-optimum guarantee, S&B §9.4)
+— **but the eval plays 585 Elo WORSE**: linear-RL vs `pst` at equal depth = 0/30. This is **S&B §9.2
+made concrete**: *"the best value function [for a better policy] is not necessarily the best for
+minimizing VE."* Regressing weak self-play outcomes erodes the sound hand-tuned weights. **RL-tuning a
+linear eval on self-play outcomes does not beat hand-tuning** — `pst` is near the linear-feature
+ceiling. Sixth confirmation of the through-line: strength lives in search + sound weights; fitting
+shallow values on self-play outcomes doesn't surpass hand-tuning on this hardware.
+
 ## Reproduce
 
 ```

@@ -209,3 +209,5 @@ mcts_elo.log
 models/tower_puct.pt
 puct_run.log
 puct_eval.log
+models/linear_rl.npz
+linear_rl.log
