@@ -17,8 +17,15 @@ import numpy as np
 import chess
 
 from engine import AlphaBetaEngine, pst_eval
-from gbdt_features import features
 from measure_ladder import random_mover, heuristic_mover, adj_pst, play, elo_diff
+
+# φ selection is read at IMPORT time so spawned MP workers pick the same set (:Feature-set-design:).
+if os.environ.get("LINEAR_FEATURES", "").lower() == "rich":
+    from rich_features import features
+    _FEATSET = "rich"
+else:
+    from gbdt_features import features
+    _FEATSET = "material+PST"
 
 SELFPLAY_DEPTH = 2
 LINEAR_RANDOM_PLIES = 4
@@ -73,14 +80,19 @@ def main():
     games_per = int(sys.argv[2]) if len(sys.argv) > 2 else 200
     workers = int(sys.argv[3]) if len(sys.argv) > 3 else max(1, cpu_count() - 1)
 
-    d = np.load("models/linear.npz")                       # warm-start (pst-like), rescaled for tanh
-    w = np.concatenate([d["coef"].astype(np.float64), [float(d["intercept"])]]) / 400.0
+    d = np.load("models/linear.npz")                       # partial warm-start: gbdt block from linear.npz
+    coef = d["coef"].astype(np.float64)
+    D_feat = len(features(chess.Board()))
+    w = np.zeros(D_feat + 1)                                # +1 bias column
+    w[:len(coef)] = coef / 400.0                            # gbdt dims warm-start; extra phi dims start at 0
+    w[-1] = float(d["intercept"]) / 400.0
     m = np.zeros_like(w); v = np.zeros_like(w); t = 0
     b1, b2, eps = 0.9, 0.999, 1e-8
     rng = np.random.RandomState(0)
-    print(f"Linear-value RL: {iters} iters x {games_per} games, {workers} workers, "
-          f"depth {SELFPLAY_DEPTH} (CPU, no GPU)\n", flush=True)
+    print(f"Linear-value RL [{_FEATSET}, phi={D_feat}d]: {iters} iters x {games_per} games, {workers} "
+          f"workers, depth {SELFPLAY_DEPTH} (CPU, no GPU)\n", flush=True)
 
+    out = "models/linear_rl_rich.npz" if _FEATSET == "rich" else "models/linear_rl.npz"
     with Pool(workers) as pool:
         for it in range(iters):
             t0 = time.time()
@@ -97,10 +109,10 @@ def main():
                 v = b2 * v + (1 - b2) * g * g
                 w -= LINEAR_LR * (m / (1 - b1 ** t)) / (np.sqrt(v / (1 - b2 ** t)) + eps)
             mse = float(np.mean((X @ w - Y) ** 2))
-            lad = _ladder(w, SELFPLAY_DEPTH, 20)
+            lad = _ladder(w, SELFPLAY_DEPTH, 10)
             print(f"iter {it}: mse={mse:.3f}  vs_random={lad['random']:.2f}  "
                   f"vs_heuristic={lad['heuristic']:.2f}  n={len(Y)}  [{time.time()-t0:.0f}s]", flush=True)
-            np.savez("models/linear_rl.npz", w=w, depth=SELFPLAY_DEPTH)
+            np.savez(out, w=w, depth=SELFPLAY_DEPTH, featset=_FEATSET)
 
     # :Linear-kill-check: head-to-head vs pst at equal depth (the ship gate)
     ev = _eval_fn(w)
@@ -110,7 +122,7 @@ def main():
     s = (W + 0.5 * D) / (W + D + L)
     print(f"\nKILL-CHECK linear-RL vs pst @d{SELFPLAY_DEPTH}: {W}W-{D}D-{L}L  score {s:.2f}  "
           f"elo_diff {elo_diff(s):+.0f}  ({'BEATS pst' if s > 0.5 else 'does NOT beat pst'})", flush=True)
-    print("saved models/linear_rl.npz")
+    print(f"saved {out}")
 
 
 if __name__ == "__main__":
