@@ -58,6 +58,7 @@ ORDER = [
     "prior-evaluator.spec.md",
     "learned-model.spec.md",
     "teacher-distillation.spec.md",
+    "nnue-eval.spec.md",
     "search-mcts.spec.md",
     "value-target.spec.md",
     "self-play-leela.spec.md",
