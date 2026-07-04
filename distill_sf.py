@@ -17,7 +17,7 @@ import os, sys, glob, json, time, math, random, threading
 import chess, chess.engine
 import torch, torch.nn.functional as F
 
-from neural_network import ChessQNetwork
+from legacy.neural_network import ChessQNetwork
 from board_utils import board_to_tensor
 
 DATA = "data/distill_sf.jsonl"

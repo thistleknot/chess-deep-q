@@ -17,7 +17,7 @@ import sys
 import time
 import chess
 
-from chess_ai import OptimizedChessAI
+from legacy.chess_ai import OptimizedChessAI
 from engine import AlphaBetaEngine, pst_eval
 from elo_calibration import score_to_elo_diff
 

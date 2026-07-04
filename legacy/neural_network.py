@@ -185,7 +185,7 @@ class DQNAgent:
         prior_bias_temperature = self.schedule.prior_bias_temperature(training_progress)
 
         # Use parallel MCTS with annealing parameters
-        from mcts import ParallelRussianDollMCTS
+        from legacy.mcts import ParallelRussianDollMCTS
         mcts = ParallelRussianDollMCTS(
             board,
             iterations=base_iterations,

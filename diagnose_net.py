@@ -6,7 +6,7 @@ hanging pieces and grabs free material, the eval is fine and MCTS is the culprit
 """
 import chess
 import torch
-from neural_network import ChessQNetwork
+from legacy.neural_network import ChessQNetwork
 from board_utils import board_to_tensor
 from engine import pst_eval
 

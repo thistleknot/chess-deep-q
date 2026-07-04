@@ -28,7 +28,7 @@ import chess
 import torch
 import torch.nn.functional as F
 
-from neural_network import ChessQNetwork
+from legacy.neural_network import ChessQNetwork
 from engine import AlphaBetaEngine
 from board_utils import board_to_tensor
 

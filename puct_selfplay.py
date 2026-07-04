@@ -250,12 +250,18 @@ def train_puct(net, opt, buffer, dev, steps, batch, use_amp):
     return sum(losses) / max(1, len(losses))
 
 
-def main():
-    iters = int(sys.argv[1]) if len(sys.argv) > 1 else 6
-    games = int(sys.argv[2]) if len(sys.argv) > 2 else 96
-    playouts = int(sys.argv[3]) if len(sys.argv) > 3 else PUCT_PLAYOUTS
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_PATH = "models/tower_puct.pt"
+
+
+def train_puct_selfplay(iters=8, games=96, playouts=PUCT_PLAYOUTS, dev=None, resume=True):
+    """:Train-mode: Stage-3 (self-play-leela.spec.md) — batched-PUCT expert iteration. Resumes from
+    MODEL_PATH if present (:Run-contract:), checkpoints each iter, returns the per-iteration curve."""
+    import os
+    dev = dev or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net = ChessResNet().to(dev)
+    if resume and os.path.exists(MODEL_PATH):
+        net.load_state_dict(torch.load(MODEL_PATH, map_location=dev)["state_dict"])
+        print(f"resumed from {MODEL_PATH}")
     opt = torch.optim.Adam(net.parameters(), lr=1e-3)
     buffer = deque(maxlen=120000)
     use_amp = (dev.type == "cuda")
@@ -280,9 +286,17 @@ def main():
         curve.append(row)
         print(f"iter {i}: eps={row['eps']}  loss={row['loss']}  vs_random={row['vs_random']}  "
               f"vs_heuristic={row['vs_heuristic']} (net+PUCT)  buf={row['buf']}  [{row['wall_s']}s]", flush=True)
-        torch.save({"state_dict": net.state_dict()}, "models/tower_puct.pt")
-    print("saved models/tower_puct.pt")
-    print("curve:", curve)
+        os.makedirs("models", exist_ok=True)
+        torch.save({"state_dict": net.state_dict()}, MODEL_PATH)
+    print(f"saved {MODEL_PATH}")
+    return curve
+
+
+def main():
+    iters = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+    games = int(sys.argv[2]) if len(sys.argv) > 2 else 96
+    playouts = int(sys.argv[3]) if len(sys.argv) > 3 else PUCT_PLAYOUTS
+    print("curve:", train_puct_selfplay(iters, games, playouts))
 
 
 if __name__ == "__main__":

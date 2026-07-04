@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import os
 from tqdm import tqdm
 
-from neural_network import ChessQNetwork, DQNAgent
-from mcts import ParallelRussianDollMCTS
+from legacy.neural_network import ChessQNetwork, DQNAgent
+from legacy.mcts import ParallelRussianDollMCTS
 from evaluation import fast_evaluate_position, format_score
 from annealing import AnnealingSchedule
 from constants import USE_DYNAMIC_DIFFICULTY, DIFFICULTY_OFFSET

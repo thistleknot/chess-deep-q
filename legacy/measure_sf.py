@@ -13,7 +13,7 @@ import time
 import chess
 import chess.engine
 
-from chess_ai import OptimizedChessAI
+from legacy.chess_ai import OptimizedChessAI
 from elo_calibration import score_to_elo_diff
 
 SF_MIN_ELO = 1320   # Stockfish's UCI_Elo floor
