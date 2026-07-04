@@ -36,9 +36,10 @@ def display_full_menu(chess_ai):
     dda_status = "ON" if chess_ai.difficulty_settings.get('enabled', False) else "OFF"
     print(f"16. Toggle Dynamic Difficulty (currently: {dda_status})")
     print("17. Configure Dynamic Difficulty settings")
-    print("18. Play vs alpha-beta engine (strong, ~1400-1700, CPU)")
+    print("18. Play vs alpha-beta engine (strong, ~1400-1700, CPU) — non-RL baseline")
     print("19. Play vs learned beam (experimental; net undertrained)")
-    print("20. Exit")
+    print("20. Play vs net+PUCT RL agent (AlphaStar-hybrid; ~parity with 1-ply heuristic)")
+    print("21. Exit")
 
 
 # Update this function in the main code
@@ -266,10 +267,14 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
         elif choice == '19':
             _play_beam(chess_ai)
         elif choice == '20':
+            # The RL deliverable: net+PUCT (tower_puct.pt), AlphaStar-hybrid.
+            from play_puct import main as play_puct_main
+            play_puct_main()
+        elif choice == '21':
             print("Exiting menu.")
             break
         else:
-            print("Invalid choice. Please enter a number between 1 and 20.")
+            print("Invalid choice. Please enter a number between 1 and 21.")
     
     # Return the updated feature flags
     return verbose, use_visual_board, use_enhanced_features

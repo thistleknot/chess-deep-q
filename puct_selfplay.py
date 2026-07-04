@@ -22,13 +22,14 @@ import torch.nn.functional as F
 from resnet_model import ChessResNet, encode18, move_index, POLICY_SIZE
 import selfplay  # reuse _ladder (d1 net-minimax vs random/heuristic)
 
-PUCT_PLAYOUTS = 64
+PUCT_PLAYOUTS = 128            # operator-strength dial (:Search-measured-gate:): higher = stronger improvement op
 PUCT_PARALLEL_GAMES = 48
 C_PUCT = 1.5
 DIRICHLET_ALPHA = 0.3
 MOVE_TEMPERATURE_PLIES = 8
 GAME_CAP = 120
-HEUR_ANNEAL_ITERS = 6          # eps: heuristic-baseline leaf blend 1→0 over these iters (:Self-play-bootstrap: a)
+LADDER_PLAYOUTS = 48           # cheap search-measured ladder (net+PUCT, not d1) per iteration
+LADDER_GAMES = 10
 
 
 class Node:
@@ -124,6 +125,39 @@ def backup(path, v_white):
         node.N[i] += 1
         node.W[i] += v_white
         node.Ntot += 1
+
+
+def puct_move(board, net, dev, playouts):
+    """Single-board PUCT: argmax over root visits, NO Dirichlet (a :Measurement-game:). This is the
+    net's ACTUAL agent — used by the :Search-measured-gate: ladder and puct_eval.py."""
+    root = Node(board.copy(stack=False))
+    _, ps = eval_boards([root.board], net, dev)
+    expand(root, ps[0], root_noise=False)
+    if not root.moves:
+        return None
+    for _ in range(playouts):
+        node, path = select_leaf(root)
+        if node.terminal:
+            backup(path, node.tv)
+        else:
+            vs, pp = eval_boards([node.board], net, dev)
+            expand(node, pp[0])
+            backup(path, float(vs[0]))
+    return root.moves[int(np.argmax(root.N))]
+
+
+def search_ladder(net, dev, playouts, games):
+    """:Search-measured-gate: ladder — net+PUCT (its real search) vs random + heuristic-1ply.
+    Replaces the d1 net-minimax probe, which is blind to this agent (0/16 losses vs 16/16 draws)."""
+    from measure_ladder import random_mover, heuristic_mover, adj_pst, play, elo_diff
+    net.eval()
+    mv = lambda b: puct_move(b, net, dev, playouts)
+    out = {}
+    for name, opp in (("random", random_mover), ("heuristic", heuristic_mover)):
+        W, D, L = play(mv, opp, games, adj_pst)
+        s = (W + 0.5 * D) / (W + D + L)
+        out[name] = {"score": s, "elo_diff": elo_diff(s), "wdl": (W, D, L)}
+    return out
 
 
 def run_selfplay_batch(net, dev, n_games, playouts, eps=0.0):
@@ -228,23 +262,24 @@ def main():
     print(f"PUCT self-play: {iters} iters x {games} games, {playouts} playouts, "
           f"batch {PUCT_PARALLEL_GAMES} games (train on {dev})\n")
     curve = []
+    anneal_iters = max(1, iters // 2)                          # heuristic baseline 1→0 over the first half
     for i in range(iters):
         t0 = time.time()
-        eps = max(0.0, 1.0 - i / max(1, HEUR_ANNEAL_ITERS))    # heuristic baseline 1→0 (AlphaStar pattern)
+        eps = max(0.0, 1.0 - i / anneal_iters)                 # AlphaStar pattern: baseline → net
         made = 0
         while made < games:
             n = min(PUCT_PARALLEL_GAMES, games - made)
             buffer.extend(run_selfplay_batch(net, dev, n, playouts, eps=eps))
             made += n
         loss = train_puct(net, opt, buffer, dev, steps=300, batch=256, use_amp=use_amp)
-        lad = selfplay._ladder(net, dev, depth=1, games=12)
+        lad = search_ladder(net, dev, LADDER_PLAYOUTS, LADDER_GAMES)   # net+PUCT, not d1
         row = {"iter": i, "eps": round(eps, 2), "loss": round(loss, 3), "buf": len(buffer),
                "vs_random": round(lad["random"]["score"], 2),
                "vs_heuristic": round(lad["heuristic"]["score"], 2),
                "wall_s": round(time.time() - t0)}
         curve.append(row)
         print(f"iter {i}: eps={row['eps']}  loss={row['loss']}  vs_random={row['vs_random']}  "
-              f"vs_heuristic={row['vs_heuristic']}  buf={row['buf']}  [{row['wall_s']}s]", flush=True)
+              f"vs_heuristic={row['vs_heuristic']} (net+PUCT)  buf={row['buf']}  [{row['wall_s']}s]", flush=True)
         torch.save({"state_dict": net.state_dict()}, "models/tower_puct.pt")
     print("saved models/tower_puct.pt")
     print("curve:", curve)
