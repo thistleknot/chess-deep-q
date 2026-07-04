@@ -61,6 +61,7 @@ ORDER = [
     "nnue-eval.spec.md",
     "search-mcts.spec.md",
     "value-target.spec.md",
+    "linear-value-rl.spec.md",
     "self-play-leela.spec.md",
     "training-loop.spec.md",
     "dynamic-difficulty.spec.md",
