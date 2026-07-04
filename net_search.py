@@ -62,6 +62,26 @@ def _resolve_quiet(board, max_plies=8):
     return b
 
 
+def policy_priors(board, net, device):
+    """Softmax policy priors over the legal moves at `board`, from the net's policy head.
+
+    Returns {move: prior in [0,1]} from ONE forward pass (encode18). This is the move-ordering
+    surface the policy head was trained for but never consumed (search used the value head only).
+    Expects a dual-head net returning (value, policy); indexes logits by resnet_model.move_index
+    (from*64+to, so underpromotions collapse to the queening move -- fine for ordering).
+    """
+    from resnet_model import encode18, move_index
+    moves = list(board.legal_moves)
+    if not moves:
+        return {}
+    with torch.no_grad():
+        out = net(encode18(board).unsqueeze(0).to(device))
+        logits = (out[1] if isinstance(out, tuple) else out).squeeze(0)
+        sel = logits[[move_index(m) for m in moves]]
+        probs = torch.softmax(sel, dim=0).tolist()
+    return dict(zip(moves, probs))
+
+
 def _white_values(boards, net, device, encode_fn=None, qdepth=0, board_eval=None):
     """White-absolute values for a list of boards, with terminal overrides.
 

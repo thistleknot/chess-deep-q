@@ -249,14 +249,19 @@ def main():
     if games <= 0:
         print("[measure] skipped (games=0)")
         return
-    print(f"[measure] net-minimax d2 vs SF@{SF_ANCHOR}, {games} games...")
+    print(f"[measure] net-minimax d2 vs SF@{SF_ANCHOR}, {games} games (in-loop TREND HINT only)...")
     score, elo = phase_measure(net, device, games)
-    print(f"\nscore {score:.2f} -> ESTIMATED Elo ~{elo:.0f} (real anchor; {games}-game noise)")
+    # NON-AUTHORITATIVE: at n~6 the per-game SD (~0.13) is wider than a gate step, so this Elo is a
+    # coin flip, not a measurement. It exists only to sketch the trend cheaply inside the run
+    # contract. Gate decisions MUST use `python measure_sf.py <net> 30` (n>=30 with CIs); never gate
+    # on this number (spec/elo-measurement.spec.md power rule).
+    print(f"\nscore {score:.2f} -> HINT Elo ~{elo:.0f} (n={games}, NOT a gate measurement; "
+          f"run measure_sf.py at n>=30 for a real anchor)")
 
     with open(TREND, "a") as fh:
         fh.write(json.dumps({"rows": rows, "added": added, "val_mse": round(vmse, 4),
                              "sign_acc": round(sign, 3), "score": score, "elo": round(elo),
-                             "label_s": label_s, "train_s": train_s,
+                             "n": games, "label_s": label_s, "train_s": train_s,
                              "core_wall_s": round(core)}) + "\n")
     print(f"trend appended to {TREND}; run wall {time.time()-run_start:.0f}s")
 

@@ -115,7 +115,8 @@ EXACT, LOWER, UPPER = 0, 1, 2
 
 
 class AlphaBetaEngine:
-    def __init__(self, eval_fn=None, time_limit=2.0, max_depth=64):
+    def __init__(self, eval_fn=None, time_limit=2.0, max_depth=64,
+                 policy_fn=None, policy_plies=0, policy_weight=80_000.0):
         self.eval_fn = eval_fn or pst_eval
         self.time_limit = time_limit
         self.max_depth = max_depth
@@ -123,6 +124,13 @@ class AlphaBetaEngine:
         self.killers = {}
         self.history = {}
         self.nodes = 0
+        # Learned move-ordering prior (spec/search-mcts.spec.md: policy head consumed via ordering).
+        # policy_fn(board) -> {move: prior in [0,1]}. Applied ONLY at ply <= policy_plies because a
+        # net call is ~2-3ms/node vs a us-fast eval -- deep application would blow the time budget.
+        # Default policy_plies=0 = root-only (a handful of calls per move, negligible overhead).
+        self.policy_fn = policy_fn
+        self.policy_plies = policy_plies
+        self.policy_weight = policy_weight
 
     # --- evaluation (side-to-move perspective) -----------------------------
     def _evaluate(self, board):
@@ -132,6 +140,12 @@ class AlphaBetaEngine:
     # --- move ordering -----------------------------------------------------
     def _order(self, board, moves, tt_move, depth):
         killers = self.killers.get(depth, ())
+        # Learned prior at shallow plies only (`depth` here is the ply; root=0). Computed once per
+        # node, then indexed inside score(). A high-prior quiet move is lifted toward capture
+        # territory (policy_weight) so the engine tries the net's suggestion early -> more cutoffs.
+        priors = self.policy_fn(board) if (self.policy_fn is not None
+                                           and depth <= self.policy_plies) else None
+        w = self.policy_weight
 
         def score(m):
             if m == tt_move:
@@ -139,10 +153,12 @@ class AlphaBetaEngine:
             if board.is_capture(m):
                 victim = board.piece_type_at(m.to_square) or chess.PAWN
                 attacker = board.piece_type_at(m.from_square) or chess.PAWN
-                return 100_000 + 10 * _CP[victim] - _CP[attacker]
+                base = 100_000 + 10 * _CP[victim] - _CP[attacker]
+                return base + (w * priors.get(m, 0.0) if priors else 0.0)
             if m in killers:
                 return 90_000
-            return self.history.get((board.turn, m.from_square, m.to_square), 0)
+            h = self.history.get((board.turn, m.from_square, m.to_square), 0)
+            return h + (w * priors.get(m, 0.0) if priors else 0.0)
 
         return sorted(moves, key=score, reverse=True)
 

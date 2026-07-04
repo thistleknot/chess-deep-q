@@ -26,7 +26,9 @@ def find_sf():
 
 def main():
     sf_elo = int(sys.argv[1]) if len(sys.argv) > 1 else 1320
-    games = int(sys.argv[2]) if len(sys.argv) > 2 else 4
+    # >=30 games is the gate-decision power floor (spec/elo-measurement.spec.md): at n=6 the per-game
+    # SD ~0.13 is wider than a gate step, so small-n Elo readings are coin flips, not measurements.
+    games = int(sys.argv[2]) if len(sys.argv) > 2 else 30
     # mode: 'mcts' (Russian-doll MCTS) or 'sN' (batched net-minimax depth N, e.g. s2, s3)
     mode = sys.argv[3] if len(sys.argv) > 3 else "mcts"
     sf_ms = int(sys.argv[4]) if len(sys.argv) > 4 else 50
@@ -102,13 +104,20 @@ def main():
         print(f"  game {g+1}/{games}: net={'W' if net_white else 'B'} {res:9s} net_pts={pts:.1f} plies={plies}")
 
     engine.quit()
+    import math
     score = total / games
-    if 0 < score < 1:
-        est = sf_elo + score_to_elo_diff(score)
-    else:
-        est = sf_elo + (400 if score >= 1 else -400)
-    print(f"\nNet score vs SF@{sf_elo}: {total:.1f}/{games} = {score:.2f}")
-    print(f"ESTIMATED net Elo: ~{est:.0f}  (real Stockfish anchor; {games}-game noise ~±100)")
+    # Binomial 95% CI on the match score, mapped to Elo around the anchor. A gate is only cleared
+    # when the CInterval lies above it; if it straddles the gate the result is INCONCLUSIVE.
+    se = math.sqrt(max(score * (1 - score), 1e-9) / games)
+    lo, hi = max(1e-4, score - 1.96 * se), min(1 - 1e-4, score + 1.96 * se)
+
+    def _est(s):
+        s = min(max(s, 1e-4), 1 - 1e-4)
+        return sf_elo + score_to_elo_diff(s)
+
+    print(f"\nNet score vs SF@{sf_elo}: {total:.1f}/{games} = {score:.2f} (95% CI {lo:.2f}-{hi:.2f})")
+    print(f"ESTIMATED net Elo: ~{_est(score):.0f}  (95% CI {_est(lo):.0f}..{_est(hi):.0f}; "
+          f"real SF anchor, n={games})")
     print(f"[wall {time.time()-start:.0f}s]")
 
 
