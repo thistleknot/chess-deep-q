@@ -20,6 +20,7 @@ import:
 - :Training-game-budget: is the per-move simulation budget used in self-play *training* games: it must guarantee visits-per-candidate at or above the informative threshold, reconciling visit targets with the :Root-selection-rule: (which exists precisely because low-budget visits are uninformative). Fast low-budget profiles are for measurement and human games, not for generating policy targets.
 - :Root-dirichlet-noise: is constant Dir(α) noise mixed into the root prior in self-play training games only — the explicit, bounded carve-out from "never anneal toward randomness": it is fixed structured exploration, never annealed, and always OFF in :Measurement-game:s.
 - :Surpass-teacher-gate: is the :Elo-gate: at the :Teacher:'s own anchor-measured strength; only after it clears may :Demo-share: reach zero.
+- :Self-play-bootstrap: is the leaf evaluator the self-play search STARTS from, along the :Prior-lineage:. Two valid entry points: (a) the HAND HEURISTIC via an eps-blend leaf — board_eval = eps·tanh(pst/…) + (1−eps)·:Learned-value:, eps annealing 1→0 so the heuristic guides early self-play and the net takes over (pure prior-lineage, NO teacher in the loop); (b) a DISTILLED net snapshot (eps=0 from a checkpoint, e.g. the Stockfish-distilled tower — warmer start). SF is never in the self-play loop under either; it is only the :Ladder: gate. The two bootstraps are compared as a :Ladder:-measured experiment — each one's per-iteration ladder curve — to see whether unaided heuristic self-play catches the distilled start (and whether either catches SF).
 - :Strength-matched-opponent: is an OPTIONAL self-play opponent mode for early training: rather than a second network, one side is the same net with its selection temperature modulated to play "just above" the reference player's strength, at a setpoint of mean + k·σ of that player's per-move quality (regret) distribution. It reuses the regret tracking in `difficulty.py` (restoring the σ term the human-difficulty path dropped) and the temperature↔strength map in `elo_calibration.py`. It is a zone-of-proximal-development / matched-difficulty curriculum, NOT gating, league, or a separately-trained second net.
 
 ***implementation reqs***
@@ -33,6 +34,10 @@ import:
 
 ***functional specs***
 
+- The :Self-play-bootstrap: must be a prior-lineage leaf, annealed toward the net, with SF out of the loop.
+  - Given the heuristic bootstrap, Then early self-play leaves are the hand heuristic (eps→1), eps anneals to 0, and the net trains on the resulting outcomes with no Stockfish in the loop.
+  - Given the distilled bootstrap, Then self-play starts from a distilled net snapshot (eps=0).
+  - Both bootstraps are placed on the :Ladder: per iteration for comparison; SF is the gate, never the in-loop teacher.
 - Self-play must emit expert-iteration targets; the value target is profile-independent, the policy target is profile-specific.
   - Given a self-play move under the net-minimax :Search-profile:, Then the stored policy target is the deeper search's chosen move (cloning) and the stored value target is the :Lambda-return: in the :White-absolute-frame:.
   - Given a self-play move under the PUCT :Search-profile:, Then the stored policy target is the root :Visit-distribution-target: and the value target is the same :Lambda-return: (which reduces to outcome z as :Bootstrap-share: β → its floor).
