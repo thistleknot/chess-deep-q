@@ -37,6 +37,10 @@ def make_eval(name):
         def ev(board):
             return pst_eval(board) + lam * float(bst.inplace_predict(features(board)[None, :])[0])
         return f"hybrid-lam{lam}", ev
+    if name == "nnue":
+        # Per-node alpha-beta eval → CPU (launch-free); the kill-check measures time at equal budget.
+        from nnue_model import load_nnue, make_nnue_eval
+        return "nnue", make_nnue_eval(load_nnue("models/nnue.pt", "cpu"), "cpu")
     raise SystemExit(f"unknown eval '{name}'")
 
 
