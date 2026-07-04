@@ -199,3 +199,5 @@ training_plots/monitoring.png
 rl_chess_a2c.pt
 rl_chess_metrics.sqlite
 training_plots/frontier.png
+train_status.log
+benchmark_run.log
