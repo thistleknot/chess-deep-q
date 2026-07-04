@@ -28,6 +28,7 @@ C_PUCT = 1.5
 DIRICHLET_ALPHA = 0.3
 MOVE_TEMPERATURE_PLIES = 8
 GAME_CAP = 120
+HEUR_ANNEAL_ITERS = 6          # eps: heuristic-baseline leaf blend 1→0 over these iters (:Self-play-bootstrap: a)
 
 
 class Node:
@@ -125,9 +126,13 @@ def backup(path, v_white):
         node.Ntot += 1
 
 
-def run_selfplay_batch(net, dev, n_games, playouts):
+def run_selfplay_batch(net, dev, n_games, playouts, eps=0.0):
     """Play n_games in lockstep, batching every leaf eval across games. Returns a list of
-    (state_tensor, (move_indices, visit_probs), z) records."""
+    (state_tensor, (move_indices, visit_probs), z) records.
+
+    eps > 0 blends the hand heuristic into the LEAF VALUE — v_leaf = eps·tanh(pst/400) +
+    (1−eps)·V_net (White-absolute) — the AlphaStar-pattern baseline: a strong (heuristic-guided)
+    search from iteration 0, off which the net learns; eps anneals to 0 as the net takes over."""
     games = []
     for _ in range(n_games):
         b = chess.Board()
@@ -154,7 +159,9 @@ def run_selfplay_batch(net, dev, n_games, playouts):
                 vs, ps = eval_boards([nd.board for nd, _ in leaves], net, dev)
                 for (nd, path), vv, pp in zip(leaves, vs, ps):
                     expand(nd, pp)
-                    backup(path, float(vv))
+                    v_leaf = float(vv) if eps <= 0.0 else \
+                        eps * selfplay.heuristic_eval(nd.board) + (1.0 - eps) * float(vv)
+                    backup(path, v_leaf)
         # (3) each game commits a move from the root visit counts, then advances (tree reuse)
         still = []
         for g in active:
@@ -223,19 +230,20 @@ def main():
     curve = []
     for i in range(iters):
         t0 = time.time()
+        eps = max(0.0, 1.0 - i / max(1, HEUR_ANNEAL_ITERS))    # heuristic baseline 1→0 (AlphaStar pattern)
         made = 0
         while made < games:
             n = min(PUCT_PARALLEL_GAMES, games - made)
-            buffer.extend(run_selfplay_batch(net, dev, n, playouts))
+            buffer.extend(run_selfplay_batch(net, dev, n, playouts, eps=eps))
             made += n
         loss = train_puct(net, opt, buffer, dev, steps=300, batch=256, use_amp=use_amp)
         lad = selfplay._ladder(net, dev, depth=1, games=12)
-        row = {"iter": i, "loss": round(loss, 3), "buf": len(buffer),
+        row = {"iter": i, "eps": round(eps, 2), "loss": round(loss, 3), "buf": len(buffer),
                "vs_random": round(lad["random"]["score"], 2),
                "vs_heuristic": round(lad["heuristic"]["score"], 2),
                "wall_s": round(time.time() - t0)}
         curve.append(row)
-        print(f"iter {i}: loss={row['loss']}  vs_random={row['vs_random']}  "
+        print(f"iter {i}: eps={row['eps']}  loss={row['loss']}  vs_random={row['vs_random']}  "
               f"vs_heuristic={row['vs_heuristic']}  buf={row['buf']}  [{row['wall_s']}s]", flush=True)
         torch.save({"state_dict": net.state_dict()}, "models/tower_puct.pt")
     print("saved models/tower_puct.pt")
