@@ -355,6 +355,7 @@ import:
   - If the buffer holds fewer than BATCH_SIZE transitions, Then the training step is a no-op.
 - Exploration must be structured (search-driven), so the agent must not expose a uniform-random epsilon path as its behavior policy.
   - The vestigial epsilon-greedy branch should be removed; move choice comes from search, not a coin flip.
+  - The standard A2C entropy-bonus (c_e·H(π) in the policy loss) is DELIBERATELY ABSENT: the policy is trained by cross-entropy to MCTS visit counts (expert iteration), and exploration entropy is injected UPSTREAM as Dirichlet root noise + visit temperature (AlphaZero-style, see self-play-leela). So the missing H(π) term is a documented choice, not an omission; adding a policy-gradient entropy bonus would double-count the exploration the search targets already carry.
 
 
 ================================================================================
