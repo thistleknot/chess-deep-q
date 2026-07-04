@@ -208,3 +208,4 @@ models/tower_offpolicy.pt
 mcts_elo.log
 models/tower_puct.pt
 puct_run.log
+puct_eval.log
