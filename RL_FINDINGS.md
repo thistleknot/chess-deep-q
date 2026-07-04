@@ -59,6 +59,24 @@ linear eval on self-play outcomes does not beat hand-tuning** — `pst` is near 
 ceiling. Sixth confirmation of the through-line: strength lives in search + sound weights; fitting
 shallow values on self-play outcomes doesn't surpass hand-tuning on this hardware.
 
+## Coda 2 — linear feature engineering (ch9/11): every knob lost to hand-tuned pst
+
+Chasing the linear eval further (S&B ch9 §9.5 features, §11 Bellman/PBE targets):
+
+| linear variant | vs pst @d2 | ~Elo |
+|---|---|---|
+| **material+PST (29 feat, MC)** | **−223** | **~1140 — best** |
+| + rich positional (42 feat, MC) | 0/30 | ~worst (overfit) |
+| + PCA-reduce (15) + TD(0)/PBE | −708 | ~659 |
+
+Adding search-complementary positional features **overfit** (42 weights on ~160 games corrupt the
+material block, 0/30). PCA-reduction + a TD(0)/Bellman target **rescued the overfit** (−1600→−708) but
+lost pst precision (15-comp cap → warm-start corr 0.89) and gave a great fit with worse play (mse ~0.1,
+§9.2/§11: min-PBE ≠ strong policy). **Hand-tuned `pst` (~1140) beat every linear-RL variant.** The
+lesson: decades of hand-tuning already sit near the **linear ceiling**; ~160 games of self-play RL
+can't improve on it within the linear class. The only real levers left are **more data** or **leaving
+the linear class** (deeper search / a bigger net at scale) — not more linear feature engineering.
+
 ## Reproduce
 
 ```

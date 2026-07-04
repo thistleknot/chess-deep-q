@@ -212,3 +212,7 @@ puct_eval.log
 models/linear_rl.npz
 linear_rl.log
 linear_5min.log
+linear_rich.log
+models/linear_rl_rich.npz
+linear_pca.log
+models/linear_rl_pca_td.npz
