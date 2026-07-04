@@ -42,21 +42,22 @@ dynamic-difficulty + elo-measurement).
 
 1. `README.md`
 2. `chess-rl.spec.md`
-3. `elo-measurement.spec.md`
-4. `annealing-schedule.spec.md`
-5. `prior-evaluator.spec.md`
-6. `learned-model.spec.md`
-7. `teacher-distillation.spec.md`
-8. `nnue-eval.spec.md`
-9. `search-mcts.spec.md`
-10. `value-target.spec.md`
-11. `linear-value-rl.spec.md`
-12. `self-play-leela.spec.md`
-13. `training-loop.spec.md`
-14. `dynamic-difficulty.spec.md`
-15. `elo-calibration.spec.md`
-16. `rl-categorization.spec.md`
-17. `terminal-interface.spec.md`
+3. `entrypoint.spec.md`
+4. `elo-measurement.spec.md`
+5. `annealing-schedule.spec.md`
+6. `prior-evaluator.spec.md`
+7. `learned-model.spec.md`
+8. `teacher-distillation.spec.md`
+9. `nnue-eval.spec.md`
+10. `search-mcts.spec.md`
+11. `value-target.spec.md`
+12. `linear-value-rl.spec.md`
+13. `self-play-leela.spec.md`
+14. `training-loop.spec.md`
+15. `dynamic-difficulty.spec.md`
+16. `elo-calibration.spec.md`
+17. `rl-categorization.spec.md`
+18. `terminal-interface.spec.md`
 
 
 
@@ -160,6 +161,49 @@ import:
 - The value head must learn the search-bootstrapped λ-return, and the policy head must learn by MCTS visit distillation — never TD(0)-only, never policy gradient (see value-target, self-play-leela, rl-categorization).
 - The two search conventions must never regress: side-to-move-relative negamax backup, and argmax-Q root selection at small simulation budgets (see search-mcts).
 - One trained :Chess-RL-system: must be dialable to any absolute strength across the human rating range by the :Absolute-strength-dial: (the :Temperature-elo-curve:), with the :Difficulty-controller: tracking the seated human relative to that operating point (see elo-calibration, dynamic-difficulty, elo-measurement).
+
+
+================================================================================
+FILE: spec\entrypoint.spec.md
+================================================================================
+
+---
+description: 'The single entrypoint contract — main.py boots the spec-governed RL system: Play / Train / Measure / Difficulty, each mode traced to its owning spec. Fills the gap where the top-level menu previously traced to no spec and ran the retired DQN.'
+import:
+  - chess-rl
+  - terminal-interface
+  - training-loop
+  - elo-measurement
+  - dynamic-difficulty
+  - self-play-leela
+---
+
+***definitions***
+
+- :Entrypoint: is `main.py` — the SOLE entrypoint to the :Chess-RL-system:. It boots directly into the :Top-menu: (no DQN goal-picker). Every action it exposes traces to a governing spec; the retired DQN (`legacy/`) is NOT reachable from :Entrypoint:. This spec exists because the previous numbered menu (1-21) lived only in `menu.py` and traced to NO spec.
+- :Top-menu: is the four-mode top level — :Play-mode:, :Train-mode:, :Measure-mode:, :Difficulty-mode: (plus exit) — the durable contract that replaces the stale DQN goal-picker + flat `.train()` loop + un-spec'd AHA options.
+- :Selectable-agent: is the agent factory (`agents.py` `make_agent(name) -> (label, move_fn)`): `puct` (the net+PUCT :Chess-RL-system:, default), `engine` (the ~1672 alpha-beta baseline), `beam` (experimental). It loads via the tolerant `measure_ladder.load_net` and is SHARED by :Play-mode: and :Measure-mode:.
+- :Play-mode: is a human game against a :Selectable-agent:, rendered through the terminal front-end governed by `terminal-interface.spec.md` (`terminal_board.py`: :Move-entry:, :Game-command:, :Board-readout:, White-default :Side-selection:). DEFAULT agent = net+PUCT (the RL deliverable, `puct_selfplay.puct_move` + `models/tower_puct.pt`). The alpha-beta `engine.py` is an OPTIONAL opponent (a baseline to SURPASS per chess-rl :Measured-disposition:), never the default.
+- :Train-mode: invokes the :Stage-controller: (`train_control.py`, training-loop.spec.md) — the staged, Elo-gated pipeline, NOT a flat game-count loop. Default approach = Stage-3 batched-PUCT self-play (the measured climber); honors the :Run-contract: (checkpoint per run).
+- :Measure-mode: runs :Measured-elo: (elo-measurement) — the :Selectable-agent: on the :Ladder: (random / heuristic-1ply / SF@1320). It is the gate authority feeding :Train-mode: transitions and :Difficulty-mode: calibration; the spec-clean successor of the old "Evaluate ELO" option.
+- :Difficulty-mode: sets the :Absolute-strength-dial: (:Temperature-elo-curve:, elo-calibration) and toggles the :Difficulty-controller: (dynamic-difficulty) that tracks the seated human — dialing the ONE trained net across the human range, feeding the :Estimated-elo-readout:.
+
+***implementation reqs***
+
+- `main.py` is a thin boot (`setup_environment` → :Top-menu:); the menu lives in `menu.py`. NEW files: `agents.py` (:Selectable-agent: factory), `train_control.py` (:Stage-controller: home, replacing `chess_ai.py`), `play_beam.py` (re-homed from `chess_ai.get_beam_move`).
+- No module reachable from :Entrypoint: may import the retired DQN core (`legacy/chess_ai.py`, `legacy/neural_network.py`, `legacy/mcts.py`). The DQN-era AHA options and the flat `.train()` loop are REMOVED — neither has a governing spec.
+- Every :Top-menu: action MUST trace to a spec (this file maps each mode to its owner).
+
+***functional specs***
+
+- :Entrypoint: must boot straight into the :Top-menu:.
+  - Given `python main.py`, Then the :Top-menu: (Play / Train / Measure / Difficulty / exit) is shown; no DQN goal-picker precedes it.
+- :Play-mode: must default to net+PUCT through the terminal-interface front-end.
+  - Given :Play-mode: with no explicit agent choice, Then the opponent is net+PUCT; the engine is offered only as an explicit optional opponent; the game runs through `terminal_board.py` with White-default :Side-selection: identical across fresh / load / FEN (fixing the FEN path that hardcoded White).
+- :Train-mode: must call the :Stage-controller:, not a flat loop.
+  - Given :Train-mode:, Then `train_control.train(approach)` runs the gated staged pipeline (default PUCT self-play) and checkpoints per the :Run-contract:.
+- :Measure-mode: must place the :Selectable-agent: on the :Ladder: and report :Measured-elo:.
+- :Difficulty-mode: must dial the trained net via the :Absolute-strength-dial:, never the DQN.
 
 
 ================================================================================
@@ -789,7 +833,7 @@ import:
 
 ***definitions***
 
-- :Stage-controller: is the orchestrator of the three training stages — Stage 1 teacher distillation, Stage 2 annealed off-policy refinement, Stage 3 expert iteration — whose transitions are gated exclusively by :Elo-gate:s, never by wall-clock or game count.
+- :Stage-controller: is the orchestrator of the three training stages — Stage 1 teacher distillation, Stage 2 annealed off-policy refinement, Stage 3 expert iteration — whose transitions are gated exclusively by :Elo-gate:s, never by wall-clock or game count. MEASURED RECONCILIATION (RL_FINDINGS): of the three, **Stage-3 batched-PUCT self-play** (the AlphaStar-hybrid, `puct_selfplay.py`) is the demonstrated climber (reached parity with heuristic-1ply); Stage-1 Stockfish distillation is a valid optional WARM-START; the Stage-2 off-policy and linear-value paths were tried and plateaued. So `train_control.py` defaults :Train-mode: to Stage-3 PUCT self-play; the full gated multi-stage sequence stays the contract but is honest that only the PUCT stage has shown climb on this hardware.
 - :Elo-trend: is the persisted per-run sequence of (dataset size, training volume, :Measured-elo:) points — the primary monitored signal across runs; loss curves are secondary diagnostics only.
 - :Self-play-game: is one game the agent plays against itself, producing a stream of :Replay-transition:s (Stage 2) or expert-iteration targets (Stage 3) and a set of per-game monitoring metrics.
 - :Teacher-agreement: is the fraction of moves in a game where the played move equals the operative :Prior-lineage: member's greedy move — a lock-in / derivative-play signal that should fall as the learner outgrows its prior. (Generalizes the earlier prior-agreement metric.)
@@ -800,7 +844,7 @@ import:
 
 ***implementation reqs***
 
-- The loop lives in `chess_ai.py`; the :Stage-controller: reads :Measured-elo: from the measurement authority and computes :Gated-progress: for the schedule (the schedule itself stays pure).
+- The loop lives in `train_control.py` (the DQN `chess_ai.py` is retired to `legacy/`); the :Stage-controller: reads :Measured-elo: from the measurement authority and computes :Gated-progress: for the schedule (the schedule itself stays pure).
 - Monitoring metrics are stored per game in the existing game-history record and plotted alongside loss and :Elo-trend:s.
 - Any concurrent data generation (labelling or self-play) and torch training occupy separate OS processes (:Process-separated-labeling: generalized).
 

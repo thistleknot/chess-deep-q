@@ -13,7 +13,7 @@ import:
 
 ***definitions***
 
-- :Stage-controller: is the orchestrator of the three training stages — Stage 1 teacher distillation, Stage 2 annealed off-policy refinement, Stage 3 expert iteration — whose transitions are gated exclusively by :Elo-gate:s, never by wall-clock or game count.
+- :Stage-controller: is the orchestrator of the three training stages — Stage 1 teacher distillation, Stage 2 annealed off-policy refinement, Stage 3 expert iteration — whose transitions are gated exclusively by :Elo-gate:s, never by wall-clock or game count. MEASURED RECONCILIATION (RL_FINDINGS): of the three, **Stage-3 batched-PUCT self-play** (the AlphaStar-hybrid, `puct_selfplay.py`) is the demonstrated climber (reached parity with heuristic-1ply); Stage-1 Stockfish distillation is a valid optional WARM-START; the Stage-2 off-policy and linear-value paths were tried and plateaued. So `train_control.py` defaults :Train-mode: to Stage-3 PUCT self-play; the full gated multi-stage sequence stays the contract but is honest that only the PUCT stage has shown climb on this hardware.
 - :Elo-trend: is the persisted per-run sequence of (dataset size, training volume, :Measured-elo:) points — the primary monitored signal across runs; loss curves are secondary diagnostics only.
 - :Self-play-game: is one game the agent plays against itself, producing a stream of :Replay-transition:s (Stage 2) or expert-iteration targets (Stage 3) and a set of per-game monitoring metrics.
 - :Teacher-agreement: is the fraction of moves in a game where the played move equals the operative :Prior-lineage: member's greedy move — a lock-in / derivative-play signal that should fall as the learner outgrows its prior. (Generalizes the earlier prior-agreement metric.)
@@ -24,7 +24,7 @@ import:
 
 ***implementation reqs***
 
-- The loop lives in `chess_ai.py`; the :Stage-controller: reads :Measured-elo: from the measurement authority and computes :Gated-progress: for the schedule (the schedule itself stays pure).
+- The loop lives in `train_control.py` (the DQN `chess_ai.py` is retired to `legacy/`); the :Stage-controller: reads :Measured-elo: from the measurement authority and computes :Gated-progress: for the schedule (the schedule itself stays pure).
 - Monitoring metrics are stored per game in the existing game-history record and plotted alongside loss and :Elo-trend:s.
 - Any concurrent data generation (labelling or self-play) and torch training occupy separate OS processes (:Process-separated-labeling: generalized).
 

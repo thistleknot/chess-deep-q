@@ -53,6 +53,7 @@ dynamic-difficulty + elo-measurement).
 ORDER = [
     "README.md",
     "chess-rl.spec.md",          # single entry point (root of the import DAG)
+    "entrypoint.spec.md",        # the top-level main.py contract (Play/Train/Measure/Difficulty)
     "elo-measurement.spec.md",
     "annealing-schedule.spec.md",
     "prior-evaluator.spec.md",
