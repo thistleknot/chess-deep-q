@@ -318,6 +318,7 @@ import:
 - :Policy-head: is the network's distribution over a flat move index (from-square × to-square + promotion piece); it is trained by cross-entropy — on Stockfish MultiPV soft targets during distillation, and on MCTS root visit distributions during self-play — never by policy gradient.
 - :Residual-tower: is the shared trunk feeding both heads: a small residual convolutional stack (on the order of 4–6 blocks × 64 filters) sized by the throughput budget below, not by a fixed architecture clause. (This supersedes the earlier "value-only is intentional" clause, which is deleted: the policy head is required for PUCT self-play.)
 - :Input-planes: is the board encoding: 12 piece-placement planes plus a mandatory side-to-move plane (and castling/en-passant planes where implemented). The side-to-move plane became mandatory the moment a :Policy-head: exists — 12 placement planes cannot identify the mover, and a policy is meaningless without knowing whose move it is. The value output remains White-absolute regardless.
+- :Encoding-packing: is the storage rule for the binary :Input-planes:: the encoded dataset and replay board tensors are 0/1 planes (several constant-fill), so they MUST be stored PACKED (uint8 or bit-packed) and unpacked to float only at batch assembly — fp32-on-disk is up to 32× wasteful (the ~217 MB encoded cache packs to single-digit MB). This is the memory reduction that COUNTS. WEIGHT quantization (NF4 / QLoRA-style) is redundant here: the tower is ~1 M params (~4 MB), so 4-bit saves nothing material, and the compute-precision win is already taken by AMP fp16 autocast. The binding constraints are batched-eval throughput (NET_MIN_BATCHED_EVALS_PER_SEC) and DATA storage, not weight memory — precision reduction is applied to DATA, never weights.
 - :Value-target-convention: is the single scale shared by every stage: tanh(white_centipawns / 400), White-absolute, in [-1,1] — used identically by teacher labels, leaf blending, TD targets, and the terminal ±1 outcomes it must be commensurate with.
 - :DQN-agent: is the `service` that owns the network(s), the target network, the replay buffer, and the training step; it coordinates learning but delegates move choice to search. (Name kept for compatibility; see rl-categorization.)
 - :Replay-transition: is a stored (state, move, reward, next-state, done) tuple, the off-policy record of experience the learner samples from.
@@ -328,6 +329,7 @@ import:
 - Constant: GAMMA, LEARNING_RATE, BATCH_SIZE, REPLAY_CAPACITY, TARGET_UPDATE_INTERVAL — developer-tuned learning rules, centralized in `constants.py`.
 - Constant: NET_MIN_BATCHED_EVALS_PER_SEC — the throughput budget any capacity change must respect. Empirical anchors (tiny 2-conv net, batch 256): ~18k evals/s CPU, ~122k evals/s GPU; single-position ~2–3 ms. Any tower change is conformant only if it still meets the constant.
 - The network MUST expose a batch-evaluate API (one forward pass for a batch of positions); search code that loops single-position inference is non-conformant.
+- Encoded board tensors and replay states MUST be stored packed (uint8/bit-packed per :Encoding-packing:) and unpacked to float only per batch; fp32-on-disk encodings are non-conformant. Weight quantization is out of scope (nets too small; AMP owns the compute-precision win).
 
 ***test reqs***
 
@@ -540,6 +542,7 @@ import:
 - :Search-bootstrap-value: is the V_boot each n-step return bootstraps from: the :Search-value: (the negamax-backed node value from the search already run to pick the move), falling back to the target-net V(s′) when no search value exists (e.g. a shallow measurement profile), then to 0. Using the search value gives the tree-backup property that makes the target off-policy-safe.
 - :Off-policy-correction: is the (default-absent) importance-sampling correction. Tree-backup safety covers only the BOOTSTRAP term (V_boot is a freshly computed :Search-value: at s′, independent of the behaviour policy). The λ-weighted TAIL G_{t+1} chains through the actual stored trajectory, so at λ near 1 the target is essentially the behaviour policy's Monte-Carlo outcome, UNCORRECTED. This is sound only while replay is recent — hence :Replay-window:. A truncated-IS Retrace(λ) weight is available behind a flag (default OFF) for staler data.
 - :Replay-window: is the bounded window of the last REPLAY_WINDOW self-play games from which trajectories are sampled. It is the recency guard that makes the uncorrected λ-tail sound (AlphaZero's implicit fix): fresh trajectories are near-on-policy, so the uncorrected Monte-Carlo tail stays low-bias.
+- :Advantage-shrinkage: is a SIGNIFICANCE filter on the advantage A = G_t^λ − V(s_t): a transition enters the policy update only if its advantage is statistically distinguishable from 0 given its uncertainty — |A| / σ_A > z_α, equivalently the interval A ± z_α·σ_A excludes 0 (the regression-coefficient t-test read off a whitened advantage; "act only on significant changes"). It DROPS insignificant transitions (a prioritized-replay filter), not zeroes them — zeroing a kept sample saves no compute (the backward pass still runs), whereas dropping focuses gradient on the capability boundary (:Value-of-information:) and denoises Bellman-residual noise. Whitening MUST be ZCA (zero-phase), not PCA, so within-trajectory correlated advantages are decorrelated IN THE ADVANTAGE BASIS and each transition's significance test is independent. It is SELF-ANNEALING: as V converges σ_A shrinks, so a FIXED α automatically admits progressively finer real advantages — this supersedes any hand-tuned magnitude dead-zone ε (deleted). σ_A is estimated cheaply as the batch advantage spread (= standard advantage normalization → significance RELATIVE to the batch, not an absolute p-value), or better from the λ-return's n-step variance / the :Search-window-reuse: δ-spread. Multiple-comparisons applies (at α over a B-batch, ~α·B pass by chance): control the false-discovery rate (Benjamini-Hochberg) across the batch, not a per-transition α, when it bites. STAGE-2+ only — advantage exists only once the λ-return refinement runs; Stage-1 distillation (supervised MSE) has none. NOT a precision/bit trick: A is a transient fp32 scalar; the memory win lives in :Encoding-packing: (learned-model).
 
 ***implementation reqs***
 
@@ -547,6 +550,7 @@ import:
 - λ is derived from the schedule's :Bootstrap-share: β as λ = 1 − β; there is no separate λ constant.
 - Constant: GAMMA — **pinned to 1** for the value target (chess is episodic with a bounded horizon and no natural discount, matching AlphaZero). With γ=1, λ=1 is exactly the terminal outcome z; any γ<1 would make λ=1 a *discounted* z, so the "collapses to z" claim holds only at γ=1.
 - Constant: REPLAY_WINDOW — the :Replay-window: size (last-N self-play games) that keeps the uncorrected λ-tail near-on-policy.
+- Constant: ADV_ALPHA — the :Advantage-shrinkage: significance level (z_α). The filter ZCA-whitens advantages and is applied at replay sampling, so dropped transitions cost no gradient step; the default σ_A estimator is the batch advantage spread (advantage normalization). No annealed magnitude ε — the significance test self-anneals via σ_A.
 - The White-absolute ↔ side-to-move frame conversion is a single shared helper (`to_stm`/`to_white`), the same sign rule as the :Negamax-backup-convention:.
 
 ***test reqs***
@@ -568,6 +572,12 @@ import:
 - The target must reduce to the legacy rule at the endpoints, so the change is a strict generalization.
   - Given β = 1 (λ = 0), Then the target equals r + γ·V(s′) — the current `neural_network.py:274` behaviour.
   - Given β at its floor (λ → 1), Then the target approaches the Monte-Carlo outcome used by AlphaZero self-play.
+- :Advantage-shrinkage: must DROP by significance, not zero by magnitude, and must whiten with ZCA.
+  - Given |A| ≤ z_α·σ_A (the confidence interval includes 0), Then the transition is excluded from the update batch — not kept with A zeroed (a kept-and-zeroed sample still runs the backward pass).
+  - Given correlated within-trajectory advantages, Then they are ZCA-whitened (not PCA) before the per-transition significance tests, so the tests are independent in the advantage basis.
+  - Given V converging (σ_A shrinking), Then a fixed ADV_ALPHA admits progressively finer advantages — there is no separate magnitude-ε anneal.
+  - Given a large batch filtered at per-transition α, Then false-discovery control (Benjamini-Hochberg) governs, not a raw per-test α.
+  - Given Stage 1 (supervised distillation), Then :Advantage-shrinkage: does not apply (no advantage exists until the λ-return refinement).
 
 
 ================================================================================
