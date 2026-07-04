@@ -85,6 +85,32 @@ class OptimizedChessAI:
             iterations=iterations,
         )
 
+    def get_beam_move(self, board, depth=6, total_ops=140):
+        """Experimental: a move from the net-guided Fibonacci beam on the residual tower
+        (models/tower.pth), separate from the MCTS path. Strength knob is the SEARCH BUDGET
+        (depth, total_ops) — the beam commits argmax (:Root-commit:), so net-temperature difficulty
+        does not apply. Returns None if the tower checkpoint is missing. The net is undertrained, so
+        this is the architecture path, not a strength claim."""
+        import os
+        import torch
+        if getattr(self, '_beam_net', None) is None:
+            path = 'models/tower.pth'
+            if not os.path.exists(path):
+                print("No models/tower.pth (residual tower) found — train it via run_stage1.py.")
+                return None
+            from resnet_model import ChessResNet
+            dev = self.dqn_agent.device
+            net = ChessResNet().to(dev)
+            sd = torch.load(path, map_location=dev)
+            if isinstance(sd, dict) and 'state_dict' in sd:
+                sd = sd['state_dict']
+            net.load_state_dict(sd)
+            net.eval()
+            self._beam_net, self._beam_dev = net, dev
+        from beam import NetBeam, schedule_for
+        beam = NetBeam(self._beam_net, self._beam_dev, schedule_for(depth, total_ops))
+        return beam.select(board)
+
     def _prior_greedy_move(self, board):
         """The fixed prior's greedy move from `board`, in the mover's perspective.
 

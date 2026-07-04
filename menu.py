@@ -36,7 +36,9 @@ def display_full_menu(chess_ai):
     dda_status = "ON" if chess_ai.difficulty_settings.get('enabled', False) else "OFF"
     print(f"16. Toggle Dynamic Difficulty (currently: {dda_status})")
     print("17. Configure Dynamic Difficulty settings")
-    print("18. Exit")
+    print("18. Play vs alpha-beta engine (strong, ~1400-1700, CPU)")
+    print("19. Play vs learned beam (experimental; net undertrained)")
+    print("20. Exit")
 
 
 # Update this function in the main code
@@ -258,10 +260,16 @@ def handle_menu_selections(chess_ai, verbose, use_visual_board, use_enhanced_fea
                     cal.save(ELO_CALIBRATION_PATH)
                     print(f"Calibration saved to {ELO_CALIBRATION_PATH}.")
         elif choice == '18':
+            # The strong opponent: pure-Python alpha-beta engine (engine.py), CPU-only.
+            from play_engine import main as play_engine_main
+            play_engine_main()
+        elif choice == '19':
+            _play_beam(chess_ai)
+        elif choice == '20':
             print("Exiting menu.")
             break
         else:
-            print("Invalid choice. Please enter a number between 1 and 18.")
+            print("Invalid choice. Please enter a number between 1 and 20.")
     
     # Return the updated feature flags
     return verbose, use_visual_board, use_enhanced_features
@@ -305,6 +313,45 @@ def _setup_difficulty(chess_ai):
     else:
         dda['enabled'], dda['mode'] = False, 'off'
         print("Full strength.")
+
+
+def _play_beam(chess_ai):
+    """Human vs the experimental net-guided beam (residual tower). Difficulty is the SEARCH BUDGET
+    (depth / total_calls), not net temperature — the beam commits argmax. The net is undertrained,
+    so expect weak play; this is the architecture path, the strong opponent is menu option 18."""
+    print("\nExperimental beam opponent (residual tower; net undertrained -> expect weak play).")
+    levels = {"1": (4, 60), "2": (6, 140), "3": (8, 300)}
+    print("  1. depth 4 (~60 calls)   2. depth 6 (~140)   3. depth 8 (~300, slower)")
+    lvl = input("Search budget (1-3, default 2): ").strip() or "2"
+    depth, ops = levels.get(lvl, levels["2"])
+    human_white = (input("Play as white? (y/n, default y): ").strip().lower() or "y") == "y"
+    board = chess.Board()
+    while not board.is_game_over():
+        print("\n" + str(board))
+        if (board.turn == chess.WHITE) == human_white:
+            raw = input("Your move (SAN/UCI, e.g. Nf3 / g1f3, 'quit'): ").strip()
+            if raw in ("quit", "q"):
+                return
+            try:
+                mv = board.parse_san(raw)
+            except ValueError:
+                try:
+                    mv = chess.Move.from_uci(raw)
+                    if mv not in board.legal_moves:
+                        raise ValueError
+                except ValueError:
+                    print("Illegal / unparseable move; try again.")
+                    continue
+            board.push(mv)
+        else:
+            print("Beam thinking...")
+            mv = chess_ai.get_beam_move(board, depth, ops)
+            if mv is None:
+                return          # tower.pth missing; message already printed
+            print(f"Beam plays: {board.san(mv)}")
+            board.push(mv)
+    print("\n" + str(board))
+    print("Result:", board.result())
 
 
 def main():

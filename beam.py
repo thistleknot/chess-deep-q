@@ -167,9 +167,14 @@ class NetBeam:
         legal = list(root.legal_moves)
         if not legal:
             return None
-        if len(legal) == 1:
-            return legal[0]
         rt = root.turn
+        if len(legal) == 1:
+            # Forced move: stamp its HONEST value (one eval), not a stale/absent stamp, so a
+            # cross-move :Delta: consumer isn't fed a phantom estimate. Margin 0 (no alternatives).
+            b = root.copy(stack=False); b.push(legal[0])
+            self.last_value = self._root_persp(self._eval_batch([b])[0][0], rt)
+            self.last_margin = 0.0
+            return legal[0]
 
         # Root policy -> keep the top widths[0] root moves BY POLICY (not random).
         _, root_pr = self._eval_batch([root])
@@ -186,10 +191,12 @@ class NetBeam:
 
         finalists = lines
         for i, w in enumerate(self.widths[1:]):
+            last = (i == len(self.widths) - 2)
+            if last and w == 1:
+                break                       # :Root-commit: argmax supersedes the dead final collapse
             lines = self._prune(lines, w)
             if len(lines) > 1:
                 finalists = lines          # last top_k (>1) survivor set, for :Move-margin:
-            last = (i == len(self.widths) - 2)
             if not last:
                 self._fan_out(lines, rt)
         # :Root-commit: — argmax over root backed-up values (not a temperature pick); exploration is
