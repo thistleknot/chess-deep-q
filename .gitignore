@@ -201,3 +201,10 @@ rl_chess_metrics.sqlite
 training_plots/frontier.png
 train_status.log
 benchmark_run.log
+nnue_killcheck.log
+models/nnue.pt
+offpolicy_run.log
+models/tower_offpolicy.pt
+mcts_elo.log
+models/tower_puct.pt
+puct_run.log
