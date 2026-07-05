@@ -43,8 +43,25 @@ score, converted to White-absolute via value_targets.to_white then squashed). Pe
             log-softmax over afterstate values carries the actor gradient while the value in the
             advantage is detached.
 
-    loss = actor_loss + DA2C_CLC * critic_loss     (DA2C_CLC down-weights the critic so the actor
-                                                    learns faster -- the tunable balance, per spec)
+    loss = DA2C_ACTOR_W * actor_loss + DA2C_CLC * critic_loss
+
+DEFAULT MODE = PURE VALUE-ONLY TD-Leaf (Giraffe recipe): DA2C_ACTOR_W=0.0, DA2C_CLC=1.0. Since the
+value net is the ONLY network — it is BOTH critic (absolute-value regression = the deployed eval) AND
+actor (policy = softmax over its own afterstate values) — an UNDETACHED actor term shapes the net's
+RELATIVE move ordering at the expense of its ABSOLUTE calibration, which IS the deployed eval quality.
+The spearhead SEARCH already reconstructs the policy from the value, so the explicit actor is redundant
+here AND corrupting (self-improve cratered the eval when it ran, d2 -58 -> -301). At the default
+(ACTOR_W=0.0) the entire actor block — including the per-move afterstate softmax forward — is SKIPPED
+(never computed), actor_loss is traced as 0.0, and the objective is pure critic = search-bootstrapped
+:Lambda-return: value regression (TD-Leaf(lambda)). The actor is RETAINED behind the flag for the
+deferred :RL-family-benchmark: :A2C-update: lane; recover the old actor-critic behaviour with
+DA2C_ACTOR_W=1 DA2C_CLC=0.1.
+
+:Best-checkpoint: because self-improve can erode the eval late, worker 0 periodically (and once at the
+end) plays a light pst rung — PST_GAMES games @ depth PST_DEPTH of the net-in-alphabeta vs
+engine.pst_eval-in-alphabeta — and snapshots the shared net to SAVE_PATH whenever it sets a NEW BEST
+pst score. The end-of-run save is a FALLBACK (only fires if no rung ran), so the eroded final net never
+clobbers a better mid-run checkpoint. The pst score is logged into the trace.
 
 TWO-PLAYER SIGN (resolved spec ambiguity): the critic is White-absolute, but a policy-gradient must
 reinforce moves from the MOVER's perspective, or Black's good moves (which LOWER the White-absolute
@@ -88,7 +105,8 @@ def _envf(name, default):
 DA2C_WORKERS = _envi("DA2C_WORKERS", min(6, max(1, (os.cpu_count() or 2) - 2)))
 DA2C_NSTEP   = _envi("DA2C_NSTEP", 10)       # bootstrap horizon / gradient-step granularity
 DA2C_LR      = _envf("DA2C_LR", 1e-3)
-DA2C_CLC     = _envf("DA2C_CLC", 0.1)        # actor/critic balance -- TUNABLE (spec), not fixed
+DA2C_ACTOR_W = _envf("DA2C_ACTOR_W", 0.0)    # actor-loss weight; 0.0 => pure value-only TD-Leaf (Giraffe)
+DA2C_CLC     = _envf("DA2C_CLC", 1.0)        # critic-loss weight -- TUNABLE (spec), not fixed
 DA2C_LAM     = _envf("DA2C_LAM", 0.8)        # lambda-return mixing (search-bootstrapped)
 DA2C_GAMMA   = _envf("DA2C_GAMMA", 1.0)      # undiscounted outcome (chess)
 DA2C_TEMP    = _envf("DA2C_TEMP", 0.25)      # actor softmax temperature over afterstate values
@@ -97,6 +115,10 @@ DA2C_DEPTH   = _envi("DA2C_DEPTH", 4)        # spearhead depth cap (:Full-width-
 GAME_CAP     = _envi("DA2C_GAME_CAP", 120)   # ply cap -> truncation-to-draw
 LADDER_EVERY = _envi("DA2C_LADDER_EVERY", 50)  # global-update milestone for the cheap ladder
 LADDER_GAMES = _envi("DA2C_LADDER_GAMES", 6)
+# :Best-checkpoint: pst rung -- net-in-alphabeta vs pst_eval-in-alphabeta, save on NEW BEST (worker 0).
+PST_EVERY    = _envi("DA2C_PST_EVERY", LADDER_EVERY)  # milestone cadence for the best-checkpoint rung
+PST_GAMES    = _envi("DA2C_PST_GAMES", 6)             # games per pst rung (light)
+PST_DEPTH    = _envi("DA2C_PST_DEPTH", 2)             # depth for both engines in the pst rung
 VALUE_SQUASH_CP = _envf("DA2C_SQUASH_CP", 400.0)  # cp scale for tanh (repo convention)
 
 # :Demo-share: eps-blend leaf: teacher share at counter=0, and the horizon over which it anneals to 0.
@@ -221,34 +243,44 @@ def gradient_step(net, opt, seg, counter, trace):
     critic_loss = ((v_net - targets_t) ** 2).mean()
 
     # ACTOR -- softmax over afterstate values (mover perspective); reinforce by spearhead advantage.
-    v_net_detached = v_net.detach()
-    actor_terms = []
-    for i, t in enumerate(seg):
-        board = t["state"]
-        mover_white = (board.turn == chess.WHITE)
-        legal = list(board.legal_moves)
-        after = []
-        for m in legal:
-            board.push(m)
-            after.append(board.copy(stack=False))
-            board.pop()
-        vals_white = net_values_white(net, after)          # (n_legal,), grad
-        vals_stm = vals_white if mover_white else -vals_white   # to_stm: mover-perspective values
-        logp = F.log_softmax(vals_stm / DA2C_TEMP, dim=0)
-        ci = legal.index(t["move"])
-        # advantage = V_search(s.chosen) - V_net(s), in the mover frame, detached.
-        child_white = t["reward"] if t["done"] else t["boot"]   # V_search(s.chosen), White-absolute
-        adv_white = child_white - float(v_net_detached[i])
-        adv = adv_white if mover_white else -adv_white          # to_stm
-        actor_terms.append(-logp[ci] * adv)
-    actor_loss = torch.stack(actor_terms).mean()
+    # Gated by DA2C_ACTOR_W: at the DEFAULT (ACTOR_W=0.0) this whole block is SKIPPED -> no actor
+    # gradient touches the shared value net, and no per-move afterstate evals are computed. The
+    # objective collapses to pure critic = TD-Leaf(lambda) value regression (the Giraffe/value-only
+    # recipe, which is the deployed-eval deliverable). The actor is retained behind the flag for the
+    # deferred :RL-family-benchmark: :A2C-update: lane (recover the old behaviour via ACTOR_W=1 CLC=0.1).
+    if DA2C_ACTOR_W != 0.0:
+        v_net_detached = v_net.detach()
+        actor_terms = []
+        for i, t in enumerate(seg):
+            board = t["state"]
+            mover_white = (board.turn == chess.WHITE)
+            legal = list(board.legal_moves)
+            after = []
+            for m in legal:
+                board.push(m)
+                after.append(board.copy(stack=False))
+                board.pop()
+            vals_white = net_values_white(net, after)          # (n_legal,), grad
+            vals_stm = vals_white if mover_white else -vals_white   # to_stm: mover-perspective values
+            logp = F.log_softmax(vals_stm / DA2C_TEMP, dim=0)
+            ci = legal.index(t["move"])
+            # advantage = V_search(s.chosen) - V_net(s), in the mover frame, detached.
+            child_white = t["reward"] if t["done"] else t["boot"]   # V_search(s.chosen), White-absolute
+            adv_white = child_white - float(v_net_detached[i])
+            adv = adv_white if mover_white else -adv_white          # to_stm
+            actor_terms.append(-logp[ci] * adv)
+        actor_loss = torch.stack(actor_terms).mean()
+        loss = DA2C_ACTOR_W * actor_loss + DA2C_CLC * critic_loss
+        al = actor_loss.detach().item()
+    else:
+        loss = DA2C_CLC * critic_loss                     # pure TD-Leaf value regression (no actor)
+        al = 0.0
 
-    loss = actor_loss + DA2C_CLC * critic_loss
     opt.zero_grad()
     loss.backward()
     opt.step()
 
-    al, cl = actor_loss.detach().item(), critic_loss.detach().item()
+    cl = critic_loss.detach().item()
     with counter.get_lock():
         counter.value += 1
         k = counter.value
@@ -283,13 +315,53 @@ def run_ladder(net, k, trace):
     print(f"[ladder @update {k}] vs_random={rs:.2f}  vs_heuristic={hs:.2f}  elo~{elo:+.0f}", flush=True)
 
 
+def save_model(net, path=SAVE_PATH):
+    """Persist the shared critic to `path` (same payload schema as the final save / load_nnue).
+
+    Used both for the mid-run :Best-checkpoint: (on a new-best pst rung) and the end-of-run save.
+    Require: `net` is the shared NNUENet. Guarantee: writes a {state_dict, acc_dim, hidden} torch save.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    torch.save({"state_dict": net.state_dict(), "acc_dim": NNUE_ACC_DIM, "hidden": NNUE_HIDDEN}, path)
+
+
+# --- :Best-checkpoint: pst rung (worker 0 only) ---------------------------------------------
+def run_pst_rung(net, k, trace):
+    """Play PST_GAMES depth-PST_DEPTH games of net-in-alphabeta vs pst_eval-in-alphabeta; return the
+    net's score in [0,1] and log a `pst_score` trace row.
+
+    Reuses the loop's AlphaBetaEngine construction (phi_widen, DA2C_TIME) at a shallow fixed depth so
+    the rung stays light. The net side uses a FRESH incremental eval (pure critic, no :Demo-share:
+    blend); the teacher side is `engine.pst_eval` directly (stateless — AlphaBetaEngine's reset guard
+    skips it). This is the checkpoint SELECTION signal: the end-of-run save captures late erosion, so a
+    NEW-BEST pst score is what the caller uses to snapshot the shared net mid-run.
+    """
+    from measure_ladder import play, adj_pst
+    net_eng = AlphaBetaEngine(eval_fn=make_incremental_nnue_eval(net), phi_widen=True,
+                              time_limit=DA2C_TIME, max_depth=PST_DEPTH)
+    pst_eng = AlphaBetaEngine(eval_fn=pst_eval, phi_widen=True,
+                              time_limit=DA2C_TIME, max_depth=PST_DEPTH)
+    net_move = lambda b: net_eng.search(b)[0]
+    pst_move = lambda b: pst_eng.search(b)[0]
+    W, D, L = play(net_move, pst_move, PST_GAMES, adj_pst)
+    score = (W + 0.5 * D) / max(1, W + D + L)
+    trace.write(json.dumps({"update": k, "pst_score": round(score, 3), "pst_wdl": [W, D, L]}) + "\n")
+    trace.flush()
+    print(f"[pst-rung @update {k}] net vs pst {W}W-{D}D-{L}L  score={score:.3f}", flush=True)
+    return score
+
+
 # --- worker: spearhead self-play + async DA2C updates ---------------------------------------
-def worker_loop(wid, net, total_updates, counter):
+def worker_loop(wid, net, total_updates, counter, best_pst):
     """One mp.Process: persistent spearhead engine (tree reuse) + own Adam over the SHARED critic.
 
     Plays self-play games, records (state, move, V_search) per ply, and every DA2C_NSTEP transitions
     (or at game end) takes one async gradient step. Stops once the shared update counter reaches
-    total_updates. Writes its own trace shard (no cross-process file contention)."""
+    total_updates. Writes its own trace shard (no cross-process file contention).
+
+    `best_pst` is the shared best pst-rung score (mp.Value 'd', seeded -1.0). Worker 0 runs the
+    :Best-checkpoint: rung and, on a NEW BEST, snapshots the shared net to SAVE_PATH; main reads this
+    to decide whether its end-of-run save would clobber a better checkpoint (it does not)."""
     seed = (os.getpid() * 2654435761 + wid) & 0x7FFFFFFF
     torch.manual_seed(seed)
     random.seed(seed)
@@ -304,12 +376,32 @@ def worker_loop(wid, net, total_updates, counter):
     os.makedirs("models", exist_ok=True)
     trace = open(f"models/da2c_trace_{wid}.jsonl", "a")
     next_ladder = LADDER_EVERY
+    next_pst = PST_EVERY
 
     def maybe_ladder(k):
         nonlocal next_ladder
         if wid == 0 and k >= next_ladder:
             run_ladder(net, k, trace)
             next_ladder += LADDER_EVERY
+
+    def pst_checkpoint(k):
+        """Run the pst rung and, on a NEW BEST shared score, snapshot the shared net to SAVE_PATH."""
+        score = run_pst_rung(net, k, trace)
+        with best_pst.get_lock():
+            new_best = score > best_pst.value
+            if new_best:
+                best_pst.value = score
+        if new_best:
+            save_model(net)
+            trace.write(json.dumps({"update": k, "best_pst": round(score, 3), "saved": SAVE_PATH}) + "\n")
+            trace.flush()
+            print(f"[best-ckpt @update {k}] new best pst_score={score:.3f} -> {SAVE_PATH}", flush=True)
+
+    def maybe_pst(k):
+        nonlocal next_pst
+        if wid == 0 and k >= next_pst:
+            next_pst += PST_EVERY
+            pst_checkpoint(k)
 
     while counter.value < total_updates:
         board = chess.Board()
@@ -322,7 +414,9 @@ def worker_loop(wid, net, total_updates, counter):
                     z = terminal_white_value(board) if over else 0.0   # truncation -> draw
                     seg[-1]["reward"] = z
                     seg[-1]["done"] = True
-                    maybe_ladder(gradient_step(net, opt, seg, counter, trace))
+                    k = gradient_step(net, opt, seg, counter, trace)
+                    maybe_ladder(k)
+                    maybe_pst(k)
                 trace.write(json.dumps({"game_len": ply}) + "\n")
                 trace.flush()
                 break
@@ -337,12 +431,16 @@ def worker_loop(wid, net, total_updates, counter):
 
             if len(seg) > DA2C_NSTEP:                     # flush a full N-step segment (tail boot set)
                 flush_seg, seg = seg[:DA2C_NSTEP], seg[DA2C_NSTEP:]
-                maybe_ladder(gradient_step(net, opt, flush_seg, counter, trace))
+                k = gradient_step(net, opt, flush_seg, counter, trace)
+                maybe_ladder(k)
+                maybe_pst(k)
                 if counter.value >= total_updates:
                     break
         if counter.value >= total_updates:
             break
 
+    if wid == 0:                                          # guarantee at least one :Best-checkpoint: rung
+        pst_checkpoint(counter.value)
     trace.close()
 
 
@@ -360,24 +458,35 @@ def main():
     net.share_memory()                                   # Hogwild: all workers update these params
 
     counter = mp.Value("i", 0)
+    best_pst = mp.Value("d", -1.0)                        # shared best pst-rung score (:Best-checkpoint:)
+    mode = "value-only TD-Leaf (Giraffe)" if DA2C_ACTOR_W == 0.0 else f"A2C actor_w={DA2C_ACTOR_W}"
     print(f"DA2C: {workers} workers x {total_updates} updates | NSTEP={DA2C_NSTEP} LR={DA2C_LR} "
-          f"CLC={DA2C_CLC} LAM={DA2C_LAM} | spearhead d{DA2C_DEPTH}/{DA2C_TIME}s (incremental eval) | "
-          f"demo-share beta0={DA2C_DEMO_SHARE0} anneal/{DA2C_ANNEAL_UPDATES} | save->{SAVE_PATH}",
+          f"ACTOR_W={DA2C_ACTOR_W} CLC={DA2C_CLC} LAM={DA2C_LAM} [{mode}] | "
+          f"spearhead d{DA2C_DEPTH}/{DA2C_TIME}s (incremental eval) | "
+          f"demo-share beta0={DA2C_DEMO_SHARE0} anneal/{DA2C_ANNEAL_UPDATES} | "
+          f"pst-rung {PST_GAMES}g@d{PST_DEPTH}/{PST_EVERY} | save->{SAVE_PATH}",
           flush=True)
 
     procs = []
     for wid in range(workers):
-        p = mp.Process(target=worker_loop, args=(wid, net, total_updates, counter))
+        p = mp.Process(target=worker_loop, args=(wid, net, total_updates, counter, best_pst))
         p.start()
         procs.append(p)
     for p in procs:
         p.join()
 
-    os.makedirs("models", exist_ok=True)
-    torch.save({"state_dict": net.state_dict(), "acc_dim": NNUE_ACC_DIM, "hidden": NNUE_HIDDEN},
-               SAVE_PATH)
-    print(f"done: {counter.value} updates | critic -> {SAVE_PATH} | traces models/da2c_trace_*.jsonl",
-          flush=True)
+    # End-of-run save is a FALLBACK: the :Best-checkpoint: rung already wrote the best-scoring net to
+    # SAVE_PATH mid-run, so overwriting it here with the (possibly eroded) FINAL net would re-introduce
+    # the late-erosion the checkpoint exists to avoid. Save the final net only if no pst rung ever set a
+    # best (best_pst still < 0). The guaranteed worker-0 end rung already saves the final net when it IS
+    # the best, so a genuinely-improving run still ends with the final net on disk.
+    if best_pst.value < 0.0:
+        save_model(net)
+        print(f"done: {counter.value} updates | final critic -> {SAVE_PATH} (no pst rung ran) | "
+              f"traces models/da2c_trace_*.jsonl", flush=True)
+    else:
+        print(f"done: {counter.value} updates | best-checkpoint critic (pst_score={best_pst.value:.3f}) "
+              f"kept at {SAVE_PATH} | traces models/da2c_trace_*.jsonl", flush=True)
 
 
 if __name__ == "__main__":
