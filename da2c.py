@@ -6,6 +6,26 @@ net-minimax). A single shared-memory NNUE critic is updated Hogwild-style by N p
 processes (Zai & Brown ch5, Listings 5.5-5.8), each running spearhead self-play with ONE persistent
 `AlphaBetaEngine(phi_widen=True)` (tree reuse) and its OWN Adam over the shared params.
 
+:Fast-eval: each worker's engine evaluates leaves through its OWN stateful incremental accumulator
+(`make_incremental_nnue_eval`, Stage 3 — ~8x cheaper than recompute-per-leaf, bit-exact). The engine
+re-anchors it via `eval_fn.reset(board)` at the top of each search, so the O(changed) make/unmake
+delta stays in lockstep with the searched root. Per-worker instance because it is STATEFUL.
+
+:Demo-share: eps-blend leaf (:Self-play-bootstrap: / :Off-policy-handoff:, :Teacher-leaf-weight:).
+The self-play BEHAVIOUR evaluates each leaf as a convex blend of our critic and a frozen TEACHER —
+    blended_eval(board) = (1 - beta)*nnue_eval(board) + beta*teacher_eval(board)
+where teacher_eval = `engine.pst_eval` (the repo's free ~1672 alpha-beta engine's eval; SAME
+White-absolute-cp frame as the NNUE eval, so the blend is frame-consistent — no conversion). `beta`
+ANNEALS 1.0 -> 0.0 over training by the SHARED global update counter:
+    beta = max(0.0, DA2C_DEMO_SHARE0 * (1 - counter/DA2C_ANNEAL_UPDATES))
+Teacher-guided early (good in-distribution data, near the frontier); pure self-play late so the net
+can SURPASS the teacher. The blend reads the CURRENT beta each call (live off the shared counter), so
+the anneal takes effect during the run; `reset(board)` delegates to the incremental NNUE eval so the
+:Accumulator: wiring still fires. The blend is BEHAVIOUR ONLY (off-policy handoff): the TRAINING
+TARGET stays `V_search` from the same search and the critic loss still regresses the RAW net toward
+its own :Lambda-return: — the gradient step / lambda_return / actor-critic loss are unchanged. `beta`
+is logged into the trace shard every DA2C_BETA_LOG_EVERY updates so the anneal is visible.
+
 Value frame: everything is WHITE-ABSOLUTE in [-1,1] (value_targets' frame). The critic NNUENet emits
 White-absolute centipawns; both it and the search value are squashed via tanh(cp / VALUE_SQUASH_CP)
 so they live on the same [-1,1] scale as the terminal +/-1 reward (repo convention, puct_selfplay.py).
@@ -50,9 +70,9 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 
-from nnue_model import (NNUENet, load_nnue, features, make_nnue_eval,
+from nnue_model import (NNUENet, load_nnue, features, make_incremental_nnue_eval,
                         NNUE_ACC_DIM, NNUE_HIDDEN)
-from engine import AlphaBetaEngine
+from engine import AlphaBetaEngine, pst_eval
 from value_targets import lambda_return, to_white
 
 
@@ -78,6 +98,11 @@ GAME_CAP     = _envi("DA2C_GAME_CAP", 120)   # ply cap -> truncation-to-draw
 LADDER_EVERY = _envi("DA2C_LADDER_EVERY", 50)  # global-update milestone for the cheap ladder
 LADDER_GAMES = _envi("DA2C_LADDER_GAMES", 6)
 VALUE_SQUASH_CP = _envf("DA2C_SQUASH_CP", 400.0)  # cp scale for tanh (repo convention)
+
+# :Demo-share: eps-blend leaf: teacher share at counter=0, and the horizon over which it anneals to 0.
+DA2C_DEMO_SHARE0    = _envf("DA2C_DEMO_SHARE0", 1.0)      # beta(0): 1.0 = pure-teacher start
+DA2C_ANNEAL_UPDATES = _envi("DA2C_ANNEAL_UPDATES", 2000)  # updates over which teacher share -> 0
+DA2C_BETA_LOG_EVERY = _envi("DA2C_BETA_LOG_EVERY", 25)    # trace-log beta every N updates (visibility)
 
 MODEL_PATH = "models/nnue.pt"
 SAVE_PATH  = os.environ.get("DA2C_OUT", MODEL_PATH)  # self-improve target; override to protect nnue.pt
@@ -122,6 +147,58 @@ def search_value_white(eng, board):
     move, info = eng.search(board)
     cp_white = to_white(info["score_cp"], board.turn == chess.WHITE)
     return move, math.tanh(cp_white / VALUE_SQUASH_CP)
+
+
+# --- :Demo-share: eps-blend leaf (teacher->self anneal) --------------------------------------
+def demo_share_beta(counter_val):
+    """Teacher leaf-share at a given global update index (:Teacher-leaf-weight:, anneals 1.0->0.0).
+
+    beta = max(0, DA2C_DEMO_SHARE0 * (1 - counter_val/DA2C_ANNEAL_UPDATES)). Single source of truth
+    for both the live blend and the trace log. A non-positive DA2C_ANNEAL_UPDATES means never-anneal
+    (beta held at DA2C_DEMO_SHARE0) rather than a divide-by-zero.
+    """
+    if DA2C_ANNEAL_UPDATES <= 0:
+        return max(0.0, DA2C_DEMO_SHARE0)
+    return max(0.0, DA2C_DEMO_SHARE0 * (1.0 - counter_val / DA2C_ANNEAL_UPDATES))
+
+
+class BlendedEval:
+    """Convex teacher/critic leaf blend for the self-play BEHAVIOUR (:Off-policy-handoff:).
+
+    __call__(board) = (1 - beta)*nnue_eval(board) + beta*teacher_eval(board), both White-absolute
+    centipawns (same frame -> no conversion). `beta` is read LIVE from the shared update counter each
+    call (via demo_share_beta), so the teacher->self anneal takes effect during the run. When beta<=0
+    the teacher term is skipped (pure critic, cheapest path).
+
+    Drop-in for AlphaBetaEngine.eval_fn. `reset(board)` DELEGATES to the incremental NNUE eval so the
+    engine's :Eval-wiring: still re-anchors the :Accumulator: at each search root. The teacher
+    (engine.pst_eval) is stateless — nothing to reset.
+
+    Require: `nnue_eval` is a stateful IncrementalNNUE (exposes reset); `counter` is the shared
+             mp.Value driving the anneal.
+    Guarantee: BEHAVIOUR only — it changes which leaves the search prefers, never the training target
+               (V_search is still read from this same search; the critic loss regresses the RAW net).
+    """
+
+    def __init__(self, nnue_eval, teacher_eval, counter):
+        self.nnue_eval = nnue_eval
+        self.teacher_eval = teacher_eval
+        self.counter = counter
+
+    def beta(self):
+        return demo_share_beta(self.counter.value)
+
+    def reset(self, board):
+        reset = getattr(self.nnue_eval, "reset", None)
+        if reset is not None:
+            reset(board)
+
+    def __call__(self, board):
+        v_nnue = self.nnue_eval(board)
+        b = self.beta()
+        if b <= 0.0:
+            return v_nnue
+        return (1.0 - b) * v_nnue + b * self.teacher_eval(board)
 
 
 # --- the DA2C gradient step (async / Hogwild on the shared critic) --------------------------
@@ -175,7 +252,10 @@ def gradient_step(net, opt, seg, counter, trace):
     with counter.get_lock():
         counter.value += 1
         k = counter.value
-    trace.write(json.dumps({"update": k, "actor_loss": al, "critic_loss": cl}) + "\n")
+    row = {"update": k, "actor_loss": al, "critic_loss": cl}
+    if DA2C_BETA_LOG_EVERY > 0 and k % DA2C_BETA_LOG_EVERY == 0:
+        row["beta"] = round(demo_share_beta(k), 4)   # :Demo-share: anneal, visible in the trace
+    trace.write(json.dumps(row) + "\n")
     trace.flush()
     return k
 
@@ -186,7 +266,9 @@ def run_ladder(net, k, trace):
     heuristic-1ply, convert the score to an Elo estimate, and log it. Kept cheap (few games, a
     shallower/faster engine) -- the RISING curve across milestones is the amplification verdict."""
     from measure_ladder import play, random_mover, heuristic_mover, adj_pst, elo_diff
-    eng = AlphaBetaEngine(eval_fn=make_nnue_eval(net), phi_widen=True,
+    # PURE critic (no :Demo-share: blend) via a fresh incremental eval — the ladder measures the net's
+    # OWN strength (the :Amplification-experiment: verdict), not the teacher-guided behaviour.
+    eng = AlphaBetaEngine(eval_fn=make_incremental_nnue_eval(net), phi_widen=True,
                           time_limit=max(0.02, DA2C_TIME / 2.0),
                           max_depth=max(2, DA2C_DEPTH - 1))
     net_move = lambda b: eng.search(b)[0]
@@ -213,7 +295,11 @@ def worker_loop(wid, net, total_updates, counter):
     random.seed(seed)
 
     opt = torch.optim.Adam(net.parameters(), lr=DA2C_LR)
-    eng = AlphaBetaEngine(eval_fn=make_nnue_eval(net), phi_widen=True,
+    # :Fast-eval: this worker's OWN stateful incremental accumulator (per-worker; it is stateful),
+    # wrapped in the :Demo-share: eps-blend leaf (teacher engine.pst_eval, annealing via the shared
+    # counter). The engine re-anchors it through BlendedEval.reset -> IncrementalNNUE.reset each search.
+    blended_eval = BlendedEval(make_incremental_nnue_eval(net), pst_eval, counter)
+    eng = AlphaBetaEngine(eval_fn=blended_eval, phi_widen=True,
                           time_limit=DA2C_TIME, max_depth=DA2C_DEPTH)
     os.makedirs("models", exist_ok=True)
     trace = open(f"models/da2c_trace_{wid}.jsonl", "a")
@@ -275,7 +361,8 @@ def main():
 
     counter = mp.Value("i", 0)
     print(f"DA2C: {workers} workers x {total_updates} updates | NSTEP={DA2C_NSTEP} LR={DA2C_LR} "
-          f"CLC={DA2C_CLC} LAM={DA2C_LAM} | spearhead d{DA2C_DEPTH}/{DA2C_TIME}s | save->{SAVE_PATH}",
+          f"CLC={DA2C_CLC} LAM={DA2C_LAM} | spearhead d{DA2C_DEPTH}/{DA2C_TIME}s (incremental eval) | "
+          f"demo-share beta0={DA2C_DEMO_SHARE0} anneal/{DA2C_ANNEAL_UPDATES} | save->{SAVE_PATH}",
           flush=True)
 
     procs = []
