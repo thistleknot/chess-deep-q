@@ -154,6 +154,23 @@ architecture is validated and reusable; equal-time strength is gated on eval SPE
 and phi's node cut converts to depth, flipping the equal-time comparison. The eval-quality lever (the
 distillation climb) keeps rising in parallel (d2 1144→1284→…).
 
+## Coda 6 — the accumulator (Stage 3) shipped, but did NOT flip the equal-time wall (Phase C corrected)
+
+Merged the incremental accumulator: bit-exact (3.2e-7cp), **7.8× faster** (407µs → 52µs eval), engine-parity
+verified, deployed agent + measure both on it. But the equal-TIME retest (NNUE+phi FAST eval vs pst @0.3s):
+**−338 (2W-1D-17L)** — statistically the SAME as the slow eval's −301, and phi-vs-no-phi is a dead wash (0.50).
+
+**Phase C's disposition was incomplete and is corrected here.** Phase C attributed the equal-time loss to the
+throughput WALL (slow eval caps depth). The fast eval falsifies that as the *sole* cause: matched on
+speed, NNUE STILL loses, because it is weaker than pst **at every depth** (d2 −83, d3 −191). The binding
+constraint at equal time is **eval QUALITY, not speed** — deeper search with a weaker eval does not beat
+deeper search with pst's better (and also µs-fast) eval. The accumulator was NECESSARY infrastructure (a real
+7.8×; it makes DA2C self-play cheap and lets a *good* eval play deep) but NOT sufficient. Caveat: measured
+under heavy load (the climb), so both engines searched shallow — favoring pst's shallow-material strength;
+an unloaded re-measure is fairer. DISPOSITION: the path to >1600-at-time requires the eval to **SURPASS pst**
+(the persistent eval-quality problem) — the climb (distillation) + DA2C (self-improve) are the levers;
+accumulator + phi + tree-reuse are the enabling infrastructure, not the strength.
+
 ## Reproduce
 
 ```
