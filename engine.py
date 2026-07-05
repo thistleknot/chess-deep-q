@@ -339,6 +339,8 @@ class AlphaBetaEngine:
         must never be the one we mutate. Returned moves are valid on the original position.
         """
         board = board.copy()
+        if hasattr(self.eval_fn, "reset"):     # :Eval-wiring: re-anchor the incremental :Accumulator:
+            self.eval_fn.reset(board)
         self.start = time.time()
         self.nodes = 0
         # Seed a legal fallback so we always return a legal move, even if depth 1 times out
@@ -376,6 +378,8 @@ class AlphaBetaEngine:
         real searched score. _root returns a side-to-move (negamax) score; flip to White-absolute.
         """
         board = board.copy()
+        if hasattr(self.eval_fn, "reset"):     # :Eval-wiring: re-anchor the incremental :Accumulator:
+            self.eval_fn.reset(board)
         self.start = time.time()
         saved_limit, self.time_limit = self.time_limit, 1e9   # depth-bounded, not time-bounded
         self.nodes = 0
