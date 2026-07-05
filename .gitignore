@@ -242,3 +242,6 @@ models/nnue_da2c.pt
 da2c_verdict.log
 cur_depth.log
 depth_confirm.log
+lam_sweep.log
+da2c_lam*.log
+models/nnue_da2c_lam*.pt
