@@ -77,6 +77,24 @@ lesson: decades of hand-tuning already sit near the **linear ceiling**; ~160 gam
 can't improve on it within the linear class. The only real levers left are **more data** or **leaving
 the linear class** (deeper search / a bigger net at scale) — not more linear feature engineering.
 
+## Coda 3 — the (τ, λ) hybrid: the interior λ is the sweet spot (first improvement on MC)
+
+Reframed the search/target choices as two continuous dials (τ = tempered top-K sampling over the
+sound-ordered moves; λ = `lambda_return` bootstrapped from the search value), tested only at extremes
+before. λ sweep at τ=0.5 (material+PST) vs pst @d2:
+
+| λ | vs pst @d2 | ~Elo |
+|---|---|---|
+| 0.0 (TD0) | −458 | ~909 |
+| 0.5 | −241 | ~1126 |
+| **0.9** | **−176** | **~1191 — best** |
+| 1.0 (MC) | −241 | ~1126 |
+
+A clean interior peak (‸): λ≈0.9 beats **both** endpoints and the prior material+PST-MC best (~1144) —
+the bias-variance middle was real. **First linear config to improve on plain MC.** Modest (~+50 Elo,
+small n, still 0/30 wins vs pst) — the λ tuning squeezes the interior; it doesn't break the linear/data
+wall. Best linear agent to date: the two-dial hybrid (τ≈0.5, λ≈0.9).
+
 ## Reproduce
 
 ```
