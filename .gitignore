@@ -239,3 +239,4 @@ phi_measure.log
 da2c_trace_*.jsonl
 da2c.log
 models/nnue_da2c.pt
+da2c_verdict.log

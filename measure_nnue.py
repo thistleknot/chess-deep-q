@@ -19,7 +19,8 @@ from nnue_model import load_nnue, make_nnue_eval
 def main():
     games = int(sys.argv[1]) if len(sys.argv) > 1 else 30
     depth = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-    net = load_nnue("models/nnue.pt", "cpu")
+    import os
+    net = load_nnue(os.environ.get("NNUE_MODEL", "models/nnue.pt"), "cpu")
     ev = make_nnue_eval(net, "cpu")
     nnue_mv = lambda b: AlphaBetaEngine(eval_fn=ev, time_limit=1e9, max_depth=depth).search(b)[0]
     pst_mv = lambda b: AlphaBetaEngine(eval_fn=pst_eval, time_limit=1e9, max_depth=depth).search(b)[0]

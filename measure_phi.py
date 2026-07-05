@@ -30,7 +30,8 @@ def report(tag, W, D, L):
 def main():
     games = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     t = float(sys.argv[2]) if len(sys.argv) > 2 else 0.3
-    net = load_nnue("models/nnue.pt", "cpu")
+    import os
+    net = load_nnue(os.environ.get("NNUE_MODEL", "models/nnue.pt"), "cpu")
     nnue = lambda: make_incremental_nnue_eval(net, "cpu")   # fast incremental eval, fresh per engine
     pst = lambda: pst_eval
     print(f"time budget {t}s/move, {games} games, equal wall-time both sides (FAST incremental eval)\n", flush=True)
