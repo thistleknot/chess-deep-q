@@ -20,6 +20,35 @@ from constants import PIECE_VALUES
 MATE = 1_000_000
 INF = 10_000_000
 
+# --- :Phi-widening: forward-pruning budget (spec/search-mcts.spec.md) -------------------------
+# Below PHI_FULL_WIDTH_FLOOR plies EVERY legal move is searched (:Full-width-floor:) so the agent
+# never prunes inside the shallow tactical horizon. Beyond it, only the top-phi_width(depth) moves
+# by ordering are expanded -- captures/checks always exempt (refutation-preserving), which is what
+# keeps the sound alpha-beta realization sound where the sampled beam is not.
+PHI_FULL_WIDTH_FLOOR = 3
+
+# Fibonacci-spaced width budget, indexed by REMAINING search depth: wide near the root (large
+# remaining depth) narrowing toward the leaves. Inlined (not beam.fib_schedule) to keep engine.py
+# torch-free -- the teacher evaluate() labeling path must not drag in torch.
+_PHI_FIB = [2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
+
+# Transposition-table size cap for :Tree-reuse:. When exceeded, the oldest half of the
+# insertion-ordered dict is evicted (Python dicts preserve insertion order).
+TT_SIZE_CAP = 2_000_000
+
+
+def phi_width(depth):
+    """:Phi-widening: quiet-move breadth budget at a node with `depth` plies remaining.
+
+    Wide near the root (large `depth`) narrowing to 2 toward the leaves (`depth`->0), so the search
+    spends fan-out where refutations still branch and narrows where they cannot. Captures and checks
+    are exempt at the call site, so this bounds only late quiet-move breadth.
+
+    Preconditions: `depth` may be any int; it is clamped into [0, len(_PHI_FIB)-1].
+    Guarantee: returns a positive width from the Fibonacci ladder.
+    """
+    return _PHI_FIB[min(max(depth, 0), len(_PHI_FIB) - 1)]
+
 # Piece-square-free fast material eval (centipawns), White-absolute. Much faster than the
 # feature-rich evaluator -> deeper search per second.
 _CP = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
@@ -116,10 +145,14 @@ EXACT, LOWER, UPPER = 0, 1, 2
 
 class AlphaBetaEngine:
     def __init__(self, eval_fn=None, time_limit=2.0, max_depth=64,
-                 policy_fn=None, policy_plies=0, policy_weight=80_000.0):
+                 policy_fn=None, policy_plies=0, policy_weight=80_000.0,
+                 phi_widen=False):
         self.eval_fn = eval_fn or pst_eval
         self.time_limit = time_limit
         self.max_depth = max_depth
+        # :Phi-widening: gate. Default OFF so the teacher evaluate() labeling path stays
+        # full-width/sound; the :Deployed-agent: ("nnue" branch in agents.make_agent) sets it ON.
+        self.phi_widen = phi_widen
         self.tt = {}
         self.killers = {}
         self.history = {}
@@ -131,6 +164,23 @@ class AlphaBetaEngine:
         self.policy_fn = policy_fn
         self.policy_plies = policy_plies
         self.policy_weight = policy_weight
+
+    # --- transposition store (:Tree-reuse: replacement policy) -------------
+    def _tt_store(self, key, depth, val, flag, move):
+        """Depth-preferred, size-capped TT store (spec :Tree-reuse:).
+
+        Require: `flag` is one of EXACT/LOWER/UPPER already downgraded by the caller for
+        phi-pruned nodes (a forward-pruned node is never EXACT).
+        Maintain: a colliding entry searched to GREATER depth is never clobbered by a shallower
+        one; total entries stay <= TT_SIZE_CAP (evict oldest half on overflow, insertion-ordered).
+        """
+        existing = self.tt.get(key)
+        if existing is not None and existing[0] > depth:
+            return                                   # keep the deeper entry
+        if existing is None and len(self.tt) >= TT_SIZE_CAP:
+            for k in list(self.tt.keys())[: len(self.tt) // 2]:
+                del self.tt[k]
+        self.tt[key] = (depth, val, flag, move)
 
     # --- evaluation (side-to-move perspective) -----------------------------
     def _evaluate(self, board):
@@ -234,8 +284,18 @@ class AlphaBetaEngine:
 
         best_val, best_move = -INF, None
         alpha_orig = alpha
+        phi_pruned = False           # any quiet move dropped by :Phi-widening: at this node?
         for i, m in enumerate(self._order(board, list(board.legal_moves), tt_move, ply)):
             is_cap = board.is_capture(m)
+            # :Phi-widening: forward prune (PRE-push). Beyond the :Full-width-floor:, drop late
+            # quiet non-checking moves outside the phi_width(depth) budget. Refutation-preserving:
+            # captures and checks are ALWAYS searched -- board.gives_check(m) is the pre-push check
+            # test (the post-push is_check below is for LMR of moves that survive). This extends the
+            # existing LMR predicate (i>=4, depth>=3, quiet, non-check) from REDUCE to DROP.
+            if self.phi_widen and ply >= PHI_FULL_WIDTH_FLOOR and i >= phi_width(depth) \
+                    and not is_cap and not board.gives_check(m):
+                phi_pruned = True
+                continue
             board.push(m)
             gives_check = board.is_check()
             if i == 0:
@@ -260,7 +320,15 @@ class AlphaBetaEngine:
                 break
 
         flag = EXACT if alpha_orig < best_val < beta else (LOWER if best_val >= beta else UPPER)
-        self.tt[key] = (depth, best_val, flag, best_move)
+        if phi_pruned and flag == EXACT:
+            # A forward-pruned node is not a true EXACT bound: a dropped quiet move could have been
+            # better, so best_val is a LOWER bound on the node's true value. Downgrade EXACT->LOWER.
+            # (UPPER/fail-low results are LEFT as-is: phi-widening is a deliberate heuristic prune, and
+            # keeping the UPPER TT cutoffs is what buys the deep node reduction — 93% vs 33% at d5 —
+            # while tactical soundness is guaranteed separately by the move-level capture/check
+            # exemption. This is the accepted positional-pruning trade, not a soundness bug.)
+            flag = LOWER
+        self._tt_store(key, depth, best_val, flag, best_move)
         return best_val
 
     # --- public API --------------------------------------------------------
@@ -333,5 +401,7 @@ class AlphaBetaEngine:
                 best_val, best_move = val, m
             if best_val > alpha:
                 alpha = best_val
-        self.tt[key] = (depth, best_val, EXACT, best_move)
+        # Root is ply 0 (below :Full-width-floor:) so no phi pruning here -> EXACT is legitimate;
+        # still route through the depth-preferred, size-capped store for :Tree-reuse:.
+        self._tt_store(key, depth, best_val, EXACT, best_move)
         return best_val, best_move

@@ -11,11 +11,11 @@ _PLAY_PLAYOUTS = 160          # :Difficulty-mode: strength dial → :Play-mode: 
 
 
 def _pick_agent():
-    """:Selectable-agent: — net+PUCT default; engine baseline; beam experimental."""
+    """:Selectable-agent: — net+PUCT default; engine baseline; beam experimental; nnue deployed."""
     print("\nAgent:  1. net+PUCT (RL agent, default)   2. alpha-beta engine (baseline)   "
-          "3. beam (experimental)")
-    c = input("Choose (1-3, default 1): ").strip() or "1"
-    return {"1": "puct", "2": "engine", "3": "beam"}.get(c, "puct")
+          "3. beam (experimental)   4. nnue (phi-widen :Deployed-agent:)")
+    c = input("Choose (1-4, default 1): ").strip() or "1"
+    return {"1": "puct", "2": "engine", "3": "beam", "4": "nnue"}.get(c, "puct")
 
 
 def play_mode():

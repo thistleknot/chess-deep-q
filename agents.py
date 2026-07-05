@@ -52,11 +52,27 @@ def make_agent(name="puct", playouts=160, engine_time=0.3):
         return (f"alpha-beta@{engine_time}s",
                 (lambda b: eng.search(b)[0]),
                 (lambda b: pst_eval(b)))
+    if name == "nnue":
+        # :Deployed-agent: — NNUE :Critic-leaf: + :Phi-widening: on the sound alpha-beta, ONE
+        # persistent engine so its Zobrist TT carries every scored node forward (:Tree-reuse:).
+        from engine import AlphaBetaEngine, pst_eval
+        path = "models/nnue.pt"
+        if os.path.exists(path):
+            from nnue_model import load_nnue, make_nnue_eval
+            net = load_nnue(path, dev)
+            eval_fn = make_nnue_eval(net, dev)
+            label = f"nnue+phi-widen@{engine_time}s"
+        else:
+            print(f"{path} not found — falling back to pst_eval for the phi-widen agent.")
+            eval_fn = pst_eval
+            label = f"pst+phi-widen@{engine_time}s"
+        eng = AlphaBetaEngine(eval_fn=eval_fn, phi_widen=True, time_limit=engine_time)
+        return (label, (lambda b: eng.search(b)[0]), eval_fn)
     if name == "beam":
         from play_beam import beam_mover
         label, mv = beam_mover(dev)
         return label, mv, None
-    raise ValueError(f"unknown agent '{name}' (puct | engine | beam)")
+    raise ValueError(f"unknown agent '{name}' (puct | engine | beam | nnue)")
 
 
 class _ValueShim:
