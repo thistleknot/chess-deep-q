@@ -57,6 +57,7 @@ TRAJECTORY_TEMP_LATE = 0.15     # near-best sampling later
 TRAJECTORY_OPENING_PLIES = 20   # plies over which temperature decays opening->late
 TRAJECTORY_RANDOM_PLIES = (4, 8)  # inclusive range of random opening plies seeding each game
 TRAJECTORY_MAX_PLIES = 80       # cap game length before starting a fresh game
+MATERIAL_IMBALANCE_FRAC = 0.35  # :Material-coverage: fraction of games seeded from a material imbalance
 
 TARGET_CP_SCALE = 400.0         # tanh(white_cp / 400) value convention
 MATE_SCORE = 100000             # cp assigned to forced mate by score(mate_score=...)
@@ -183,14 +184,36 @@ def sample_move(board, cands, rng, temp):
     return cands[-1][0]
 
 
+def perturb_material(board, rng):
+    """:Material-coverage: remove 1-3 random non-king pieces to seed a material-imbalanced but LEGAL
+    start, so trajectories carry the decisive-material quiet positions balanced SF-vs-SF play omits.
+    Each removal is reverted if it makes the position invalid (e.g. leaves the non-mover in check)."""
+    n_remove = int(rng.choice([1, 1, 2, 3]))
+    squares = [sq for sq, p in board.piece_map().items() if p.piece_type != chess.KING]
+    rng.shuffle(squares)
+    removed = 0
+    for sq in squares:
+        if removed >= n_remove:
+            break
+        piece = board.remove_piece_at(sq)
+        if board.is_valid():
+            removed += 1
+        else:
+            board.set_piece_at(sq, piece)   # revert an illegal removal
+    return board
+
+
 def new_game(rng):
-    """Seed a fresh :Position-source: game with TRAJECTORY_RANDOM_PLIES random opening plies."""
+    """Seed a fresh :Position-source: game with TRAJECTORY_RANDOM_PLIES random opening plies, and with
+    probability MATERIAL_IMBALANCE_FRAC seed a :Material-coverage: material imbalance."""
     board = chess.Board()
     n = rng.randint(*TRAJECTORY_RANDOM_PLIES)
     for _ in range(n):
         if board.is_game_over():
             break
         board.push(rng.choice(list(board.legal_moves)))
+    if rng.random() < MATERIAL_IMBALANCE_FRAC and not board.is_game_over():
+        perturb_material(board, rng)
     return board
 
 
