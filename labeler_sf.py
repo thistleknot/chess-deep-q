@@ -56,7 +56,8 @@ TRAJECTORY_TEMP_OPENING = 1.0   # hot (diverse) sampling early
 TRAJECTORY_TEMP_LATE = 0.15     # near-best sampling later
 TRAJECTORY_OPENING_PLIES = 20   # plies over which temperature decays opening->late
 TRAJECTORY_RANDOM_PLIES = (4, 8)  # inclusive range of random opening plies seeding each game
-TRAJECTORY_MAX_PLIES = 80       # cap game length before starting a fresh game
+TRAJECTORY_MAX_PLIES = 120      # ~60 moves: covers the master band (40-45) + engine-length grinding
+                                # endgames where material is CONVERTED (the phase 80/40-moves truncated)
 MATERIAL_IMBALANCE_FRAC = 0.35  # :Material-coverage: fraction of games seeded from a material imbalance
 
 TARGET_CP_SCALE = 400.0         # tanh(white_cp / 400) value convention
@@ -235,7 +236,9 @@ def run_worker(shard, seconds, depth, seed=0):
     ply = 0
     with open(shard, "a") as fh:
         while time.time() - start < seconds:
-            if board.is_game_over() or ply >= TRAJECTORY_MAX_PLIES:
+            # 50-move rule ("boxing decision"): no capture/pawn move in 50 moves -> draw, so games run
+            # long ONLY while making progress (conversion) and end the moment they stall to shuffling.
+            if board.is_game_over() or board.can_claim_fifty_moves() or ply >= TRAJECTORY_MAX_PLIES:
                 board = new_game(rng)
                 ply = 0
                 continue
