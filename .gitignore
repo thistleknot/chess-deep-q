@@ -216,3 +216,10 @@ linear_rich.log
 models/linear_rl_rich.npz
 linear_pca.log
 models/linear_rl_pca_td.npz
+beamtest.log
+_beamtest.py
+pairk.log
+_pairk.py
+annealed2.log
+_annealed2.py
+policyorder.log
