@@ -67,6 +67,10 @@ def labeler(path, depth, stop_event, out_list, out_lock):
 
 
 def main():
+    print("[deprecation] distill_sf.py's in-process threaded labellers are RETIRED "
+          "(GIL violation, ~58 labels/s). Generate labels with: python gen_labels.py "
+          "[seconds] [depth] [n_workers]. This script's labelling role is superseded; "
+          "training reads the corpus produced by gen_labels.py.\n")
     minutes = float(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else 5.0
     depth = int(sys.argv[2]) if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else 8
     n_lab = int(sys.argv[3]) if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else 4
