@@ -229,3 +229,5 @@ models/optuna_lambda.db
 optuna_tune.log
 data/distill_v2.jsonl
 corpus_gen.log
+nnue_train.log
+nnue_kc_d2.log

@@ -95,6 +95,30 @@ the bias-variance middle was real. **First linear config to improve on plain MC.
 small n, still 0/30 wins vs pst) — the λ tuning squeezes the interior; it doesn't break the linear/data
 wall. Best linear agent to date: the two-dial hybrid (τ≈0.5, λ≈0.9).
 
+## Coda 4 — Stage 2: the enriched-data NNUE (the distillation bet), measured
+
+Rebuilt the label pipeline per fresh literature review (in-distribution teacher-trajectory positions,
+quiet-filter, soft-MultiPV + WDL, ~3× augmentation, multiprocessing labeling 58→~120/s) and trained the
+v1 NNUE arch on **156k enriched positions** (~450k augmented). Result vs pst @d2:
+
+| eval | vs pst @d2 | ~Elo |
+|---|---|---|
+| v1 NNUE (66k random/one-hot) | −559 | ~808 |
+| **Stage-2 NNUE (156k enriched)** | **−585** | **~782 — no improvement** |
+
+Better data at this volume did **NOT** move the wall. Two root causes, the second more important:
+1. **Volume** — 156k ≪ the millions the literature needs (arXiv:2412.17948 ≈ 44k games ≈ millions of positions).
+2. **Coverage** — quiet + strong-SF-play trajectories are material-**BALANCED** (mean |cp|~170; only 8%
+   have |cp|>750), so the eval never learns to value decisive material (queen-up read **+380**, not +900),
+   and alpha-beta exploits that hole at depth. The `:Quiet-filter:` that correctly removes tactical noise
+   ALSO strips the material-imbalanced-but-quiet positions (won endgames, pawn-up middlegames) the eval
+   needs. Stockfish's own NNUE avoids this only via a HUGE corpus that contains them.
+
+Disposition: the data lever is real but needs BOTH massive volume AND material-imbalance coverage — not
+just cleaner midgame positions. At feasible one-GPU data (minutes–hours), the learned eval still loses to
+hand-tuned pst; the honest ceiling (club-to-IM, needs 10⁶–10⁷+ well-covered positions) stands. The
+pipeline (`gen_labels.py`, quiet+soft+aug) is correct and reusable; what's missing is scale + coverage.
+
 ## Reproduce
 
 ```
