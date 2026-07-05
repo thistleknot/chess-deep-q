@@ -132,6 +132,28 @@ ceiling'd), the NNUE is nonlinear and was still improving (sign_acc climbing, va
 HEADROOM past pst with more coverage+volume. Gap to pst is now −223, not −585. Next levers: more
 coverage/volume (the metrics hadn't plateaued), then the depth advantage (NNUE at d3+ once fast, Stage 3).
 
+## Coda 5 — the deployed agent (NNUE critic + phi-widening + tree reuse), measured
+
+Built the integrated play agent (spec `:Deployed-agent:`): sound alpha-beta + NNUE `:Critic-leaf:` +
+`:Full-width-floor:` (d3) + `:Phi-widening:` (forward-prune to a Fibonacci budget, captures/checks exempt
+= refutation-preserving) + `:Tree-reuse:` (persistent TT). Verified: tactically SOUND (same move as
+full-width on free-queen/trap positions), **93% node reduction at d5** (9,556 vs 137,565), tree reuse
+works. But the EQUAL-TIME kill-check (`measure_phi.py`, 0.3s/move):
+
+| match | score | ~Elo |
+|---|---|---|
+| NNUE+phi vs pst @0.3s | 0.15 (−301) | ~1127 |
+| NNUE+phi vs NNUE-no-phi @0.3s | 0.45 (−35) | wash |
+
+**The throughput wall dominates, cleanly isolated.** The search structure is correct, but at a TIME
+budget the 281µs recompute-per-leaf NNUE caps depth, and phi's 93% node cut does NOT overcome the
+per-eval cost — pst's µs eval simply searches deeper, so phi-widening is a wash vs plain alpha-beta and
+both lose to pst. The eval-quality edge (equal-DEPTH: d3=1481) is ERASED at equal TIME. Disposition: the
+architecture is validated and reusable; equal-time strength is gated on eval SPEED, not search structure.
+**Stage 3 (the incremental `:Accumulator:` + int8, µs eval) is the binding unlock** — make the eval fast
+and phi's node cut converts to depth, flipping the equal-time comparison. The eval-quality lever (the
+distillation climb) keeps rising in parallel (d2 1144→1284→…).
+
 ## Reproduce
 
 ```
