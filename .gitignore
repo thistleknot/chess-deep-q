@@ -236,3 +236,5 @@ corpus_gen*.log
 nnue_train*.log
 nnue_kc*.log
 phi_measure.log
+da2c_trace_*.jsonl
+da2c.log
