@@ -35,6 +35,7 @@ _TAU = float(os.environ.get("LINEAR_TAU", "0") or 0)          # 0 = argmax; >0 =
 _LAMBDA = float(os.environ.get("LINEAR_LAMBDA", "0.7") or 0.7)
 LINEAR_TEMP_PLIES = int(os.environ.get("LINEAR_TEMP_PLIES", "6") or 6)
 LINEAR_TOPK = 5
+KILL_GAMES = int(os.environ.get("KILL_GAMES", "30") or 30)     # kill-check n (raise to beat noise when tuning)
 
 SELFPLAY_DEPTH = 2
 LINEAR_RANDOM_PLIES = 4
@@ -199,7 +200,7 @@ def main():
     ev = _eval_fn(w, reducer)
     lin = lambda b: AlphaBetaEngine(eval_fn=ev, time_limit=1e9, max_depth=SELFPLAY_DEPTH).search(b)[0]
     pst = lambda b: AlphaBetaEngine(eval_fn=pst_eval, time_limit=1e9, max_depth=SELFPLAY_DEPTH).search(b)[0]
-    W, D, L = play(lin, pst, 30, adj_pst)
+    W, D, L = play(lin, pst, KILL_GAMES, adj_pst)
     s = (W + 0.5 * D) / (W + D + L)
     print(f"\nKILL-CHECK [{_FEATSET}/{_REDUCE or 'raw'}/{_TARGET}] vs pst @d{SELFPLAY_DEPTH}: "
           f"{W}W-{D}D-{L}L  score {s:.2f}  elo_diff {elo_diff(s):+.0f}  "
