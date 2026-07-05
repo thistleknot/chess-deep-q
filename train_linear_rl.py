@@ -19,6 +19,7 @@ import chess
 
 from engine import AlphaBetaEngine, pst_eval
 from measure_ladder import random_mover, heuristic_mover, adj_pst, play, elo_diff
+from value_targets import lambda_return, to_white
 
 # Read at IMPORT time so spawned MP workers agree (φ set); reducer/target reach workers via args.
 if os.environ.get("LINEAR_FEATURES", "").lower() == "rich":
@@ -28,7 +29,12 @@ else:
     from gbdt_features import features
     _FEATSET = "material+PST"
 _REDUCE = os.environ.get("LINEAR_REDUCE", "").lower()          # "pca" | ""
-_TARGET = os.environ.get("LINEAR_TARGET", "mc").lower()        # "td" | "mc"
+_TARGET = os.environ.get("LINEAR_TARGET", "mc").lower()        # "lambda" | "td" | "mc"
+# :Two-dial-hybrid: — tau (exploration breadth) + lambda (value-target bias-variance).
+_TAU = float(os.environ.get("LINEAR_TAU", "0") or 0)          # 0 = argmax; >0 = tempered top-K sampling
+_LAMBDA = float(os.environ.get("LINEAR_LAMBDA", "0.7") or 0.7)
+LINEAR_TEMP_PLIES = int(os.environ.get("LINEAR_TEMP_PLIES", "6") or 6)
+LINEAR_TOPK = 5
 
 SELFPLAY_DEPTH = 2
 LINEAR_RANDOM_PLIES = 4
@@ -54,9 +60,26 @@ def _eval_fn(w, reducer):
     return lambda board: float(_phi(board, reducer) @ wf + wb)
 
 
+def _sample_move(board, eng, ev, rng):
+    """tau-tempered softmax over the TOP-K moves by engine ordering, scored by afterstate value in
+    the mover frame ('scoring temperature near max moves'). Ordering ranks captures/checks high, so
+    the sample keeps refutations — sound exploration, not the old uniform beam."""
+    legal = list(board.legal_moves)
+    if len(legal) == 1:
+        return legal[0]
+    ordered = eng._order(board, legal, None, 0)[:LINEAR_TOPK]
+    sign = 1.0 if board.turn == chess.WHITE else -1.0
+    scores = np.empty(len(ordered))
+    for i, m in enumerate(ordered):
+        board.push(m); scores[i] = sign * ev(board); board.pop()
+    p = np.exp((scores - scores.max()) / max(_TAU, 1e-6)); p /= p.sum()
+    return ordered[int(rng.choice(len(ordered), p=p))]
+
+
 def _play_one(args):
-    """Worker: one alpha-beta self-play game. Returns (list φ, list target) — target = z (MC) or the
-    TD(0) one-step bootstrap ev(s_next), z at terminal. All White-absolute."""
+    """Worker: one SOUND alpha-beta self-play game. Records the White-absolute sound-search value per
+    state; target = lambda_return (mc=lam1 / td=lam0 / interior). tau>0 => tempered top-K sampling at
+    opening plies (:Two-dial-hybrid:). All White-absolute."""
     w, reducer, target_mode, seed = args
     ev = _eval_fn(w, reducer)
     eng = AlphaBetaEngine(eval_fn=ev, time_limit=1e9, max_depth=SELFPLAY_DEPTH)
@@ -66,23 +89,28 @@ def _play_one(args):
         if board.is_game_over():
             break
         mvs = list(board.legal_moves); board.push(mvs[rng.randint(len(mvs))])
-    seq, plies = [], 0
+    phis, vsearch, plies = [], [], 0
     while not board.is_game_over() and plies < GAME_CAP:
-        mv = eng.search(board)[0]
-        if mv is None or mv not in board.legal_moves:
+        best, info = eng.search(board)
+        if best is None or best not in board.legal_moves:
             break
-        seq.append(board.copy(stack=False))
+        phis.append(_phi(board, reducer))
+        # Bootstrap V(s) on the OUTCOME scale: clamp to [-1,1] so the engine's mate injection (+-1e6)
+        # and large material scores don't blow up the lambda-return (the terminal reward z is +-1).
+        vw = to_white(float(info.get("score_cp", 0.0)), board.turn == chess.WHITE)
+        vsearch.append(max(-1.0, min(1.0, vw)))
+        mv = _sample_move(board, eng, ev, rng) if (_TAU > 0 and plies < LINEAR_TEMP_PLIES) else best
         board.push(mv); plies += 1
-    seq.append(board.copy(stack=False))                        # final state (terminal or cap)
     z = 1.0 if board.is_checkmate() and board.turn == chess.BLACK else \
         (-1.0 if board.is_checkmate() else 0.0)
-    phis, targets = [], []
-    for i in range(len(seq) - 1):
-        phis.append(_phi(seq[i], reducer))
-        if target_mode == "td" and i + 1 < len(seq) - 1:        # bootstrap; last transition uses z
-            targets.append(ev(seq[i + 1]))
-        else:
-            targets.append(z)
+    n = len(phis)
+    if n == 0:
+        return [], []
+    lam = {"mc": 1.0, "td": 0.0}.get(target_mode, _LAMBDA)      # mc/td are lambda_return endpoints
+    rewards = [0.0] * (n - 1) + [z]
+    boot = vsearch[1:] + [0.0]                                  # bootstrap_values[t] = V(s_{t+1})
+    dones = [False] * (n - 1) + [True]
+    targets = lambda_return(rewards, boot, dones, lam)
     return phis, targets
 
 
@@ -139,10 +167,12 @@ def main():
         m = np.zeros_like(w); v = np.zeros_like(w); t = 0
         b1, b2, eps = 0.9, 0.999, 1e-8
         rng = np.random.RandomState(0)
-        tag = f"{_FEATSET}/{_REDUCE or 'raw'}/{_TARGET}"
+        tag = f"{_FEATSET}/{_REDUCE or 'raw'}/{_TARGET}" + \
+            (f"(lam={_LAMBDA},tau={_TAU})" if _TARGET == "lambda" else "")
         print(f"Linear-value RL [{tag}, phi={len(w)-1}d]: {iters}x{games_per} games, {workers} workers, "
               f"d{SELFPLAY_DEPTH} (CPU)\n", flush=True)
-        out = f"models/linear_rl_{_REDUCE or 'raw'}_{_TARGET}.npz"
+        out = f"models/linear_rl_{_TARGET}" + \
+            (f"_l{str(_LAMBDA).replace('.', '')}" if _TARGET == "lambda" else "") + ".npz"
 
         for it in range(iters):
             t0 = time.time()
