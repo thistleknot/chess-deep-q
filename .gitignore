@@ -235,3 +235,4 @@ climb_*.log
 corpus_gen*.log
 nnue_train*.log
 nnue_kc*.log
+phi_measure.log
