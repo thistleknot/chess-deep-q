@@ -83,12 +83,17 @@ def main():
     corpus = sys.argv[3] if len(sys.argv) > 3 else (DATA_V2 if os.path.exists(DATA_V2) else DATA_TANH)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    max_rows = int(os.environ.get("NNUE_MAX_ROWS", "800000"))   # memory/time cap for the climb
     t = time.time()
     rows = load_rows(corpus)
-    n = len(rows)
-    print(f"loaded {n} rows from {corpus} in {time.time()-t:.0f}s")
-
+    corpus_n = len(rows)
     rng = np.random.RandomState(0)
+    if corpus_n > max_rows:
+        keep = rng.choice(corpus_n, max_rows, replace=False)
+        rows = [rows[i] for i in keep]      # random subsample keeps coverage; bounds ~3x aug in RAM
+    n = len(rows)
+    print(f"loaded {corpus_n} rows from {corpus}; training on {n} (cap {max_rows}) in {time.time()-t:.0f}s")
+
     perm = rng.permutation(n)
     nval = min(4000, n // 10)
     val_rows = [rows[i] for i in perm[:nval]]

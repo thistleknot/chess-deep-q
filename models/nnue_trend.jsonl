@@ -1,0 +1,3 @@
+{"records": 66000, "elo_diff": -559, "elo": 808, "score": 0.03, "sign_acc": null, "label": "v1: 66k random/one-hot", "cycle": 0}
+{"records": 156000, "elo_diff": -585, "elo": 782, "score": 0.03, "sign_acc": 0.746, "label": "156k enriched, balanced", "cycle": 0}
+{"records": 469033, "elo_diff": -223, "elo": 1144, "score": 0.22, "sign_acc": 0.815, "label": "469k enriched + coverage", "cycle": 0}
