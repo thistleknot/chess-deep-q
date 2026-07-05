@@ -58,9 +58,9 @@ def make_agent(name="puct", playouts=160, engine_time=0.3):
         from engine import AlphaBetaEngine, pst_eval
         path = "models/nnue.pt"
         if os.path.exists(path):
-            from nnue_model import load_nnue, make_nnue_eval
+            from nnue_model import load_nnue, make_incremental_nnue_eval
             net = load_nnue(path, dev)
-            eval_fn = make_nnue_eval(net, dev)
+            eval_fn = make_incremental_nnue_eval(net, dev)   # Stage 3: ~8x faster -> deeper at time
             label = f"nnue+phi-widen@{engine_time}s"
         else:
             print(f"{path} not found — falling back to pst_eval for the phi-widen agent.")
