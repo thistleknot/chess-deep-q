@@ -171,6 +171,27 @@ an unloaded re-measure is fairer. DISPOSITION: the path to >1600-at-time require
 (the persistent eval-quality problem) — the climb (distillation) + DA2C (self-improve) are the levers;
 accumulator + phi + tree-reuse are the enabling infrastructure, not the strength.
 
+## Coda 7 — DA2C self-improve DEGRADED the eval (self-play erosion, again)
+
+Ran the DA2C loop (sound spearhead + TD-Leaf(λ) advantage-actor-critic + annealed demo-share teacher blend,
+fast incremental eval) to self-improve the distilled critic. Verdict vs pst:
+
+| eval | d2 | d3 |
+|---|---|---|
+| climb-distilled `nnue.pt` | −58 (parity) | −191 |
+| **self-improved `nnue_da2c.pt`** | **−301** | **−301** |
+
+Self-play made the eval WORSE at both depths. Even the SOUND operator (spearhead, not the falsified beam)
++ TD-Leaf targets + teacher-guided data eroded the distilled weights (S&B §9.2: regressing self-play
+OUTCOMES drags weights off the sound teacher point). The demo-share annealed to pure self-play, and the
+pure-self-play phase is what degraded it. **Distillation > self-play — the definitive confirmation.**
+
+Session disposition: the distillation climb REACHED PARITY with pst at d2 (1367 @1.19M positions, the first
+learned eval to match the hand eval — up from 808), but never SURPASSED it; self-play degraded it; the
+equal-time wall holds at −255 (learned eval weaker at depth, holes exploited by search). The accumulator
+(7.8× faster eval) is real and merged but did NOT flip the wall — eval QUALITY, not speed, is binding. We
+did not break 1600. Honest ceiling on this hardware/data: a learned eval that MATCHES pst at shallow depth.
+
 ## Reproduce
 
 ```
