@@ -1,10 +1,18 @@
-"""Train the NNUE eval (spec/nnue-eval.spec.md :NNUE-training:) — v1 BOOTSTRAP target.
+"""Train the NNUE eval (spec/nnue-eval.spec.md :NNUE-training:) — Stage-2 off-policy distillation.
 
-Supervised MSE(V, SF centipawns) on the Stockfish-distilled labels already on disk (the α=1 phase;
-the RL phase later swaps the target to self-play λ-returns = TD-Leaf). Device-agnostic: trains on
-CUDA if available. Outputs models/nnue.pt for AlphaBetaEngine(eval_fn=make_nnue_eval(...)).
+Supervised MSE(V, SF centipawns) on the Stage-1 ENRICHED corpus (data/distill_v2.jsonl: in-distribution
+trajectory positions, quiet-filtered, dict schema with tanh value). This IS the :Distillation-anchor:
+at alpha=1 — the whole objective is the supervised tether; Stage 4 (Expert Iteration) later blends a
+self-play TD-Leaf term against this same anchor so self-play cannot erode the distilled floor.
 
-Usage: python train_nnue.py [epochs] [batch]
+:Label-augmentation: — the training split is expanded ~3x by the two valid chess symmetries (horizontal
+mirror when castling-free, color-flip with sign-negated value), the free variance-reduction lever on a
+scarce corpus. Val is NOT augmented (clean held-out).
+
+Architecture is HELD at v1 (128 acc / 32 hidden) so this run isolates the hypothesis under test: does
+better DATA (enriched + more) move the eval off the v1 wall (d2=808 vs pst 1367), independent of arch.
+
+Usage: python train_nnue.py [epochs] [batch] [corpus_path]
 """
 import os, sys, json, time
 import numpy as np
@@ -13,28 +21,48 @@ import torch.nn.functional as F
 import chess
 
 from nnue_model import NNUENet, features, make_nnue_eval, NNUE_ACC_DIM, NNUE_HIDDEN
+from gbdt_features import cp_from_tanh
+import augment
 
-DATA_CP = "data/distill_cp.jsonl"
-DATA_TANH = "data/distill_sf.jsonl"
+DATA_V2 = "data/distill_v2.jsonl"       # Stage-1 enriched dict corpus (preferred)
+DATA_TANH = "data/distill_sf.jsonl"     # legacy fallback ([fen, tanh_value] lists)
 OUT = "models/nnue.pt"
 CP_CLIP = 2000.0
 
 
-def load():
-    """Return (index_lists, cp_targets). Raw cp labels preferred; recover from tanh if absent."""
-    raw = os.path.exists(DATA_CP)
-    src = DATA_CP if raw else DATA_TANH
-    print(f"loading {'RAW cp' if raw else 'tanh (recovered)'} labels from {src}")
-    from gbdt_features import cp_from_tanh
-    idxs, ys = [], []
-    with open(src) as fh:
+def load_rows(path):
+    """Load label rows as dicts {fen, value(tanh), ...}. Tolerates dict schema and legacy [fen, v]."""
+    rows = []
+    with open(path) as fh:
         for line in fh:
-            try:
-                fen, v = json.loads(line)[:2]
-            except Exception:
+            line = line.strip()
+            if not line:
                 continue
-            idxs.append(features(chess.Board(fen)))
-            cp = max(-CP_CLIP, min(CP_CLIP, float(v))) if raw else cp_from_tanh(v)
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                rows.append(obj)
+            elif isinstance(obj, list) and len(obj) >= 2:
+                rows.append({"fen": obj[0], "value": obj[1]})   # legacy tanh value
+    return rows
+
+
+def rows_to_xy(rows, do_augment):
+    """(feature-index lists, cp targets) from label rows; optionally add mirror/color-flip variants.
+
+    Augmentation transforms the whole row (augment.py handles the value sign/frame), so converting each
+    variant's tanh 'value' through cp_from_tanh yields the correctly-transformed cp target.
+    """
+    idxs, ys = [], []
+    for r in rows:
+        variants = [r]
+        if do_augment:
+            m = augment.mirror(r)          # None when the position has castling rights (not equivalent)
+            if m is not None:
+                variants.append(m)
+            variants.append(augment.color_flip(r))
+        for v in variants:
+            cp = max(-CP_CLIP, min(CP_CLIP, cp_from_tanh(float(v["value"]))))
+            idxs.append(features(chess.Board(v["fen"])))
             ys.append(cp)
     return idxs, np.array(ys, dtype=np.float32)
 
@@ -52,32 +80,39 @@ def batch_tensors(idx_lists, dev):
 def main():
     epochs = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     batch = int(sys.argv[2]) if len(sys.argv) > 2 else 1024
+    corpus = sys.argv[3] if len(sys.argv) > 3 else (DATA_V2 if os.path.exists(DATA_V2) else DATA_TANH)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     t = time.time()
-    idxs, y = load()
-    n = len(y)
-    print(f"{n} positions in {time.time()-t:.0f}s; cp range [{y.min():.0f},{y.max():.0f}] "
-          f"mean|cp| {np.abs(y).mean():.0f}; training on {dev}")
+    rows = load_rows(corpus)
+    n = len(rows)
+    print(f"loaded {n} rows from {corpus} in {time.time()-t:.0f}s")
 
     rng = np.random.RandomState(0)
     perm = rng.permutation(n)
     nval = min(4000, n // 10)
-    val_i, tr_i = perm[:nval], perm[nval:]
+    val_rows = [rows[i] for i in perm[:nval]]
+    tr_rows = [rows[i] for i in perm[nval:]]
+
+    idxs_tr, y_tr = rows_to_xy(tr_rows, do_augment=True)     # train: ~3x via symmetries
+    idxs_val, y_val = rows_to_xy(val_rows, do_augment=False)  # val: clean held-out
+    print(f"train {len(y_tr)} (aug from {len(tr_rows)}) | val {len(y_val)} | "
+          f"cp range [{y_tr.min():.0f},{y_tr.max():.0f}] mean|cp| {np.abs(y_tr).mean():.0f} | {dev}")
 
     net = NNUENet().to(dev)
     opt = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-4)
-    yv = torch.tensor(y[val_i], device=dev)
-    vf, vo = batch_tensors([idxs[i] for i in val_i], dev)
+    yv = torch.tensor(y_val, device=dev)
+    vf, vo = batch_tensors(idxs_val, dev)
+    ntr = len(y_tr)
 
     for ep in range(epochs):
         net.train()
-        order = rng.permutation(len(tr_i))
+        order = rng.permutation(ntr)
         losses = []
-        for s in range(0, len(order), batch):
-            bi = [tr_i[j] for j in order[s:s + batch]]
-            feats, offs = batch_tensors([idxs[i] for i in bi], dev)
-            tgt = torch.tensor(y[bi], device=dev)
+        for s in range(0, ntr, batch):
+            bi = order[s:s + batch]
+            feats, offs = batch_tensors([idxs_tr[j] for j in bi], dev)
+            tgt = torch.tensor(y_tr[bi], device=dev)
             opt.zero_grad()
             loss = F.mse_loss(net(feats, offs), tgt)
             loss.backward(); opt.step()

@@ -10,8 +10,8 @@ This replaces distill_sf.py's retired in-process threaded labellers (the measure
 labels/s GIL violation). Distillation TRAINING still reads the finished corpus separately.
 
 Usage:
-    python gen_labels.py [seconds] [depth] [n_workers]
-Defaults: 300s, depth 8, 4 workers.
+    python gen_labels.py [seconds] [depth] [n_workers] [out_path]
+Defaults: 300s, depth 8, 4 workers, data/distill_sf.jsonl.
 """
 
 import os
@@ -84,6 +84,7 @@ def main():
     seconds = float(sys.argv[1]) if len(sys.argv) > 1 else 300.0
     depth = int(sys.argv[2]) if len(sys.argv) > 2 else 8
     n_workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+    data_path = sys.argv[4] if len(sys.argv) > 4 else DATA
 
     os.makedirs(SHARD_DIR, exist_ok=True)
     stamp = int(time.time())
@@ -104,12 +105,12 @@ def main():
         p.wait()
     elapsed = time.time() - start
 
-    generated, added = merge_shards(shard_paths, DATA)
+    generated, added = merge_shards(shard_paths, data_path)
     for sp in shard_paths:
         if os.path.exists(sp):
             os.remove(sp)
 
-    total = sum(1 for _ in open(DATA)) if os.path.exists(DATA) else 0
+    total = sum(1 for _ in open(data_path)) if os.path.exists(data_path) else 0
     print(
         f"Generated {generated} labels in {elapsed:.0f}s "
         f"({generated/elapsed:.1f} labels/s across {n_workers} workers). "

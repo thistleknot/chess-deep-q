@@ -225,3 +225,7 @@ _annealed2.py
 policyorder.log
 lambda_sweep.log
 _sweep.sh
+models/optuna_lambda.db
+optuna_tune.log
+data/distill_v2.jsonl
+corpus_gen.log
