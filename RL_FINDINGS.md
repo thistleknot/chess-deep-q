@@ -114,10 +114,23 @@ Better data at this volume did **NOT** move the wall. Two root causes, the secon
    ALSO strips the material-imbalanced-but-quiet positions (won endgames, pawn-up middlegames) the eval
    needs. Stockfish's own NNUE avoids this only via a HUGE corpus that contains them.
 
-Disposition: the data lever is real but needs BOTH massive volume AND material-imbalance coverage — not
-just cleaner midgame positions. At feasible one-GPU data (minutes–hours), the learned eval still loses to
-hand-tuned pst; the honest ceiling (club-to-IM, needs 10⁶–10⁷+ well-covered positions) stands. The
-pipeline (`gen_labels.py`, quiet+soft+aug) is correct and reusable; what's missing is scale + coverage.
+**COVERAGE FIX (`:Material-coverage:`, the unlock):** seeded 35% of trajectories from a material
+imbalance (`perturb_material`: remove 1–3 pieces), regenerated to **469k** positions (decisive |cp|>750:
+8%→13%). The eval learned to value material — queen-up **+380→+671**, start +160→**+41**, sign_acc
+**0.746→0.815**, val_rmse 174→146cp — and PLAY jumped:
+
+| eval | vs pst @d2 | ~Elo |
+|---|---|---|
+| v1 (66k random/one-hot) | −559 | ~808 |
+| enriched, balanced (156k) | −585 | ~782 |
+| **enriched + coverage (469k)** | **−223** | **~1144** |
+
+**+362 Elo from the coverage fix** (shutout → 13/30 draws) — the first LEARNED eval to reach the linear
+ceiling (~1140). Disposition FLIPPED from coda 2/3: the data lever WORKS; the earlier "learned evals
+can't beat pst" was a DATA-coverage artifact, not a ceiling. Crucially, unlike the linear eval (feature-
+ceiling'd), the NNUE is nonlinear and was still improving (sign_acc climbing, val_rmse dropping) — it has
+HEADROOM past pst with more coverage+volume. Gap to pst is now −223, not −585. Next levers: more
+coverage/volume (the metrics hadn't plateaued), then the depth advantage (NNUE at d3+ once fast, Stage 3).
 
 ## Reproduce
 
