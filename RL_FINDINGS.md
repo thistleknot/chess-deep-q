@@ -192,6 +192,32 @@ equal-time wall holds at −255 (learned eval weaker at depth, holes exploited b
 (7.8× faster eval) is real and merged but did NOT flip the wall — eval QUALITY, not speed, is binding. We
 did not break 1600. Honest ceiling on this hardware/data: a learned eval that MATCHES pst at shallow depth.
 
+## Coda 8 — depth AMPLIFIES eval holes; coverage FILLS them (mechanism proven, not yet 1600)
+
+Built the first CALIBRATED yardstick this session — `measure_nnue_ladder.py`: NNUE+phi vs **SF@1320
+(anchored)**, Elo = 1320 + elo_diff(score). And a bounded selective spear (`engine.py` `selective=True`):
+full-width-3 + a ~2-4k-node selective extension reaching **ply 10 at ~11k nodes** (vs base-phi d8 = 127k) —
+the user's "full-3 + phi 4-11 at bounded cost" table, realized soundly (forcing replies never pruned).
+
+| eval + search | d4 (phi) | d11 (selective spear ~11k nodes) |
+|---|---|---|
+| champion `nnue.pt` | **~1467** | ~926 |
+| coverage `nnue_cov.pt` | ~1231 | ~1183 |
+
+- **DEPTH AMPLIFIES HOLES.** The champion COLLAPSES 1467→926 as depth grows: deeper search steers into the
+  positions the eval reads falsely-high (holes it never learned). This one curve explains the whole session —
+  equal-time losses, self-play erosion, d4-as-sweet-spot are all the same mechanism.
+- **COVERAGE FILLS HOLES.** `nnue_cov` (both-edges corpus: `EXPLORE_FRAC=0.15` uniform-random trajectory
+  moves visit BAD positions SF then labels) FLATTENED the depth curve — d11 **926→1183 (+257)**, no longer
+  craters. Mechanism VALIDATED; extends the +362 :Material-coverage: lever (the user's "sample both edges").
+- **BUT coverage QUALITY, not fraction, is the wall.** The crude corpus (uniform-random blunders → 82%
+  decisive) hurt the shallow peak (d4 1467→1231) and only halved the depth-damage (−541→−48). Random blunders
+  are the WRONG negatives (obvious/decisive, already half-known); they skew the balanced eval d4 needs.
+- **Disposition: NOT 1600. Champion ~1467 @ d4 (calibrated, beats SF@1320 0.70) is the deliverable.** The
+  path past it is coverage QUALITY — subtle IN-DISTRIBUTION holes via adversarial mining (play the eval's own
+  preferred moves, SF-label where it disagrees), not more random blunders. Distillation stays the
+  ceiling-raiser (self-play erodes at every lens; Codas 6-7).
+
 ## Reproduce
 
 ```
