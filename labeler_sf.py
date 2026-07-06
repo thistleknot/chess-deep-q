@@ -34,6 +34,7 @@ Usage (back-compatible arg shape):
     python labeler_sf.py <shard_path> <seconds> <depth> [seed]
 """
 
+import os
 import sys
 import json
 import math
@@ -58,7 +59,14 @@ TRAJECTORY_OPENING_PLIES = 20   # plies over which temperature decays opening->l
 TRAJECTORY_RANDOM_PLIES = (4, 8)  # inclusive range of random opening plies seeding each game
 TRAJECTORY_MAX_PLIES = 120      # ~60 moves: covers the master band (40-45) + engine-length grinding
                                 # endgames where material is CONVERTED (the phase 80/40-moves truncated)
-MATERIAL_IMBALANCE_FRAC = 0.35  # :Material-coverage: fraction of games seeded from a material imbalance
+MATERIAL_IMBALANCE_FRAC = float(os.environ.get("MATERIAL_IMBALANCE_FRAC", "0.35"))  # :Material-coverage:
+#   fraction of games seeded from a material imbalance (proven +362 lever; env-tunable, kept at 0.35 so the
+#   ONLY changed variable is EXPLORE_FRAC -- clean attribution of the both-edges lever)
+EXPLORE_FRAC = float(os.environ.get("EXPLORE_FRAC", "0.15"))  # :Both-edges: fraction of trajectory moves
+#   played UNIFORM-RANDOM over ALL legal moves (not just the MultiPV top-K) so the walk visits BAD /
+#   post-blunder positions -- the negative edge the softmax-over-good-moves sampler never reaches. SF then
+#   labels those positions with their TRUE value (oracle -> no exploration/greedy-backup bias, unlike
+#   model-free RL). softmax(good) + uniform(bad edge) + material seeding = both edges covered.
 
 TARGET_CP_SCALE = 400.0         # tanh(white_cp / 400) value convention
 MATE_SCORE = 100000             # cp assigned to forced mate by score(mate_score=...)
@@ -261,7 +269,14 @@ def run_worker(shard, seconds, depth, seed=0):
                 if n % 200 == 0:
                     fh.flush()
 
-            move = sample_move(board, cands, rng, anneal_temp(ply))
+            # :Both-edges: with prob EXPLORE_FRAC play a uniform-random legal move (reach a BAD position
+            # SF labels next iteration) instead of the softmax-over-MultiPV good-move sample. Fills the
+            # negative-coverage holes; SF is the oracle so the off-distribution label is still true.
+            if EXPLORE_FRAC > 0 and rng.random() < EXPLORE_FRAC:
+                legal = list(board.legal_moves)
+                move = rng.choice(legal) if legal else None
+            else:
+                move = sample_move(board, cands, rng, anneal_temp(ply))
             if move is None:
                 board = new_game(rng)
                 ply = 0
