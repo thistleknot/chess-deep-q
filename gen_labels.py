@@ -23,6 +23,11 @@ import subprocess
 
 DATA = "data/distill_sf.jsonl"
 SHARD_DIR = "data"
+# Which per-process labelling worker to spawn. Default is the teacher-softmax trajectory worker
+# (labeler_sf.py); set LABELER_MODULE=label_dagger.py to generate :DAGGER-aggregation: shards (the
+# agent's own search picks the trajectory move). Both share the arg shape and row schema, so the
+# same launcher/merge drives either without a code change.
+LABELER_MODULE = os.environ.get("LABELER_MODULE", "labeler_sf.py")
 
 
 def row_fen(obj):
@@ -90,7 +95,7 @@ def main():
     stamp = int(time.time())
     shard_paths = [os.path.join(SHARD_DIR, f"_shard_{stamp}_{i}.jsonl") for i in range(n_workers)]
 
-    print(f"Launching {n_workers} labeler processes, depth {depth}, {seconds:.0f}s each...")
+    print(f"Launching {n_workers} {LABELER_MODULE} processes, depth {depth}, {seconds:.0f}s each...")
     start = time.time()
     procs = []
     for i, sp in enumerate(shard_paths):
@@ -98,7 +103,7 @@ def main():
         if os.path.exists(sp):
             os.remove(sp)
         p = subprocess.Popen(
-            [sys.executable, "labeler_sf.py", sp, str(seconds), str(depth), str(stamp + i)]
+            [sys.executable, LABELER_MODULE, sp, str(seconds), str(depth), str(stamp + i)]
         )
         procs.append(p)
     for p in procs:
