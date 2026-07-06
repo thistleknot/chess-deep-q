@@ -199,10 +199,16 @@ Built the first CALIBRATED yardstick this session — `measure_nnue_ladder.py`: 
 full-width-3 + a ~2-4k-node selective extension reaching **ply 10 at ~11k nodes** (vs base-phi d8 = 127k) —
 the user's "full-3 + phi 4-11 at bounded cost" table, realized soundly (forcing replies never pruned).
 
-| eval + search | d4 (phi) | d11 (selective spear ~11k nodes) |
-|---|---|---|
-| champion `nnue.pt` | **~1467** | ~926 |
-| coverage `nnue_cov.pt` | ~1231 | ~1183 |
+| eval + search | d4 (phi) | d11 (selective spear ~11k nodes) | depth Δ |
+|---|---|---|---|
+| champion `nnue.pt` (0% cov) | **~1467** | ~926 | −541 |
+| `nnue_cov2` (~9% cov) | ~1409 | ~1183 | −226 |
+| `nnue_cov` (~17% cov) | ~1231 | ~1183 | −48 |
+
+**Coverage FRACTION sweep saturates: d11 pins at ~1183 for BOTH 9% and 17%**, while more coverage just
+trades d4 peak for nothing extra. Depth stays net-negative (d11 < d4) on EVERY eval. The 1183 plateau is the
+signature that coverage QUALITY (not fraction) is the wall — crude random-blunder negatives fill the obvious
+holes and stop; the subtle holes the deep search walks into need agent-visited (DAGGER) coverage.
 
 - **DEPTH AMPLIFIES HOLES.** The champion COLLAPSES 1467→926 as depth grows: deeper search steers into the
   positions the eval reads falsely-high (holes it never learned). This one curve explains the whole session —
