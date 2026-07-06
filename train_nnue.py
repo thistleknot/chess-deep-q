@@ -26,7 +26,8 @@ import augment
 
 DATA_V2 = "data/distill_v2.jsonl"       # Stage-1 enriched dict corpus (preferred)
 DATA_TANH = "data/distill_sf.jsonl"     # legacy fallback ([fen, tanh_value] lists)
-OUT = "models/nnue.pt"
+OUT = os.environ.get("NNUE_OUT", "models/nnue.pt")   # env-overridable so a coverage/experiment retrain
+#   writes to a separate file instead of clobbering the champion models/nnue.pt
 CP_CLIP = 2000.0
 
 
