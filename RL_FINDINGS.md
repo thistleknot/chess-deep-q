@@ -204,11 +204,22 @@ the user's "full-3 + phi 4-11 at bounded cost" table, realized soundly (forcing 
 | champion `nnue.pt` (0% cov) | **~1467** | ~926 | −541 |
 | `nnue_cov2` (~9% cov) | ~1409 | ~1183 | −226 |
 | `nnue_cov` (~17% cov) | ~1231 | ~1183 | −48 |
+| `nnue_dagger` (~4% agent-visited) | ~1457 | ~1157 | −300 |
 
-**Coverage FRACTION sweep saturates: d11 pins at ~1183 for BOTH 9% and 17%**, while more coverage just
-trades d4 peak for nothing extra. Depth stays net-negative (d11 < d4) on EVERY eval. The 1183 plateau is the
-signature that coverage QUALITY (not fraction) is the wall — crude random-blunder negatives fill the obvious
-holes and stop; the subtle holes the deep search walks into need agent-visited (DAGGER) coverage.
+**Coverage FRACTION sweep saturates: d11 pins at ~1157-1183 for crude 9%/17% AND DAGGER 4%**, while more
+crude coverage just trades d4 peak for nothing extra. **DAGGER (`label_dagger.py`: agent plays its own moves,
+SF labels — the hole distribution) VALIDATED its efficiency**: at 4% it KEPT the d4 peak (1457≈1467) and
+still flattened depth (926→1157), where crude coverage had to sacrifice the peak. In-distribution coverage
+doesn't skew the balanced eval. BUT the d11 ceiling (~1157-1183) held, and **depth is net-negative on EVERY
+eval (d11 < d4 always)** — nothing beat the champion's ~1467 @d4.
+
+**DISPOSITION (session end): did NOT break 1600. Calibrated ceiling ~1467 @d4.** Root cause: the eval
+(distilled from SF@d8) is not competent enough to guide search past ~d4-5 — deeper search finds more of the
+eval's own errors than good moves, so depth doesn't pay. This is the eval CLASS ceiling, not a search bug
+(the spear reaches ply 10 at ~11k nodes soundly). Two real paths past 1467, both major investments:
+(1) DAGGER at SCALE (~74k corpus = ~7h gen; 4% didn't saturate like crude, so quantity MIGHT break the
+plateau — uncertain); (2) STRONGER TEACHER / bigger net (distill SF@d12-15, not d8) to raise the d4 ceiling
+directly — more likely to actually exceed 1467 since the ceiling is eval competence, not search depth.
 
 - **DEPTH AMPLIFIES HOLES.** The champion COLLAPSES 1467→926 as depth grows: deeper search steers into the
   positions the eval reads falsely-high (holes it never learned). This one curve explains the whole session —
