@@ -253,3 +253,15 @@ data/distill_coverage.jsonl
 data/distill_v3.jsonl
 models/nnue_cov.pt
 coverage_train.log
+ladder_selective.log
+cov_test.log
+data/distill_v3b.jsonl
+coverage_train2.log
+models/nnue_cov2.pt
+cov2_test.log
+data/distill_dagger.jsonl
+dagger_gen.log
+data/distill_dag.jsonl
+dagger_train.log
+models/nnue_dagger.pt
+dagger_pipe.log
