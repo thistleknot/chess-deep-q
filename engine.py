@@ -7,8 +7,21 @@ learned evaluator only has to be a good, fast value function to feed it.
 Evaluation is pluggable: pass any `eval_fn(board) -> white-absolute centipawn-ish score`. Defaults
 to the project's fast_evaluate_position, but a lighter material+PST eval searches far deeper per
 second (see fast_material_eval).
+
+Forward pruning (spec/search-mcts.spec.md :Full-width-floor: + :Phi-widening:) has two profiles,
+both flag-gated OFF by default so the teacher evaluate() labeling path stays full-width/sound:
+  * phi_widen=True  -- base :Phi-widening:: full width to PHI_FULL_WIDTH_FLOOR, then a per-node
+                       Fibonacci breadth budget beyond it (captures/checks always exempt).
+  * selective=True  -- bounded SELECTIVE-SPEARHEAD variant of :Phi-widening:: full width to the
+                       floor, then extend ONLY forcing replies (captures/checks) + the top-W quiet
+                       moves (W tapering with depth), capped by a global beyond-floor node budget
+                       (PHI_SEL_BUDGET). search() pays the wide floor once then spends the budget
+                       depth-first, so a highly selective subset of lines reaches deep toward
+                       max_depth while total nodes stay ~= floor + budget (a narrowing spearhead,
+                       not the full-width blowup).
 """
 
+import os
 import time
 import random
 import chess
@@ -31,6 +44,23 @@ PHI_FULL_WIDTH_FLOOR = 3
 # remaining depth) narrowing toward the leaves. Inlined (not beam.fib_schedule) to keep engine.py
 # torch-free -- the teacher evaluate() labeling path must not drag in torch.
 _PHI_FIB = [2, 3, 5, 8, 13, 21, 34, 55, 89, 144]
+
+# --- :Phi-widening: SELECTIVE-SPEARHEAD variant (spec/search-mcts.spec.md) ---------------------
+# The default phi_width budget above is a per-node breadth cap indexed by REMAINING depth; with a
+# high max_depth it still branches to ~127k nodes at d8 (wide-near-root x deep). The `selective`
+# variant is a BOUNDED spearhead instead: full width to PHI_FULL_WIDTH_FLOOR (unchanged), then
+# beyond the floor expand ONLY (a) every forcing reply -- captures and checks, the same soundness
+# exemption as base :Phi-widening: -- plus (b) the top-W quiet moves by ordering, W tapering from
+# PHI_SEL_START at the first extended ply toward 1 deeper. A global NODE BUDGET (PHI_SEL_BUDGET)
+# caps nodes spent BEYOND the floor per search(): once exhausted, further beyond-floor nodes return
+# the static eval instead of expanding. Because alpha-beta explores best-ordered moves first, the
+# budget is spent on the most promising lines -> they reach deep, the rest stay shallow. This makes
+# it a narrowing spearhead (nodes ~= full-width-floor + budget), NOT the full-width d8 blowup.
+# Two tunable knobs (env or __init__ param, literature-then-Optuna later):
+#   PHI_SEL_START  -- quiet width at the first extended ply (default 3), tapers toward 1 deeper.
+#   PHI_SEL_BUDGET -- extra-node cap beyond the floor per search (default 3000).
+PHI_SEL_START_DEFAULT = int(os.environ.get("PHI_SEL_START", "3"))
+PHI_SEL_BUDGET_DEFAULT = int(os.environ.get("PHI_SEL_BUDGET", "3000"))
 
 # Transposition-table size cap for :Tree-reuse:. When exceeded, the oldest half of the
 # insertion-ordered dict is evicted (Python dicts preserve insertion order).
@@ -146,13 +176,24 @@ EXACT, LOWER, UPPER = 0, 1, 2
 class AlphaBetaEngine:
     def __init__(self, eval_fn=None, time_limit=2.0, max_depth=64,
                  policy_fn=None, policy_plies=0, policy_weight=80_000.0,
-                 phi_widen=False):
+                 phi_widen=False, selective=False, phi_sel_start=None, phi_sel_budget=None):
         self.eval_fn = eval_fn or pst_eval
         self.time_limit = time_limit
         self.max_depth = max_depth
         # :Phi-widening: gate. Default OFF so the teacher evaluate() labeling path stays
         # full-width/sound; the :Deployed-agent: ("nnue" branch in agents.make_agent) sets it ON.
         self.phi_widen = phi_widen
+        # :Phi-widening: SELECTIVE-SPEARHEAD variant (bounded deep extension). Default OFF so nothing
+        # else changes: when selective=True the per-node phi_width budget is REPLACED by the tapering
+        # top-W-quiet + forcing-reply expansion, gated by a global beyond-floor node budget. Knobs
+        # come from the __init__ param when given, else the env (PHI_SEL_START/PHI_SEL_BUDGET), else
+        # the documented defaults -- read at construction so a per-run env override takes effect.
+        self.selective = selective
+        self.phi_sel_start = (phi_sel_start if phi_sel_start is not None
+                              else int(os.environ.get("PHI_SEL_START", "3")))
+        self.phi_sel_budget = (phi_sel_budget if phi_sel_budget is not None
+                               else int(os.environ.get("PHI_SEL_BUDGET", "3000")))
+        self._ext_nodes = 0            # nodes expanded BEYOND the :Full-width-floor: this search()
         self.tt = {}
         self.killers = {}
         self.history = {}
@@ -186,6 +227,18 @@ class AlphaBetaEngine:
     def _evaluate(self, board):
         e = self.eval_fn(board)
         return e if board.turn == chess.WHITE else -e
+
+    # --- selective-spearhead quiet breadth ---------------------------------
+    def _sel_width(self, ply):
+        """:Phi-widening: SELECTIVE variant quiet-move breadth at `ply` beyond the floor.
+
+        Tapers from `phi_sel_start` at the first extended ply (ply == PHI_FULL_WIDTH_FLOOR) toward 1
+        the deeper the node sits, so the spearhead narrows hard as it descends. Forcing replies
+        (captures/checks) are exempt at the call site, so this bounds ONLY quiet-move breadth.
+
+        Guarantee: returns an int >= 1.
+        """
+        return max(1, self.phi_sel_start - (ply - PHI_FULL_WIDTH_FLOOR))
 
     # --- move ordering -----------------------------------------------------
     def _order(self, board, moves, tt_move, depth):
@@ -271,6 +324,17 @@ class AlphaBetaEngine:
         if depth <= 0:
             return self._quiesce(board, alpha, beta)
 
+        # :Phi-widening: SELECTIVE-SPEARHEAD node budget (spec :Full-width-floor: + :Phi-widening:).
+        # Count every beyond-floor node that would EXPAND; once the running total exceeds the budget,
+        # stop extending and return the static eval instead of recursing. Alpha-beta visits the
+        # best-ordered lines first, so the budget is spent deepening the promising PV -- the spearhead
+        # -- while off-PV beyond-floor nodes bottom out shallow. The budget, not max_depth, is the
+        # real limiter, so search() can iterative-deepen toward a high max_depth without a blowup.
+        if self.selective and ply >= PHI_FULL_WIDTH_FLOOR:
+            self._ext_nodes += 1
+            if self._ext_nodes > self.phi_sel_budget:
+                return self._evaluate(board)
+
         # Null-move pruning: hand the opponent a free move; if we're still >= beta, prune.
         # Skipped in check and in likely-zugzwang (no non-pawn material) to stay sound.
         if (depth >= 3 and not board.is_check() and any(
@@ -285,14 +349,25 @@ class AlphaBetaEngine:
         best_val, best_move = -INF, None
         alpha_orig = alpha
         phi_pruned = False           # any quiet move dropped by :Phi-widening: at this node?
+        quiets_kept = 0              # quiet (non-forcing) moves expanded so far (selective variant)
+        sel_w = self._sel_width(ply) if self.selective else 0
         for i, m in enumerate(self._order(board, list(board.legal_moves), tt_move, ply)):
             is_cap = board.is_capture(m)
-            # :Phi-widening: forward prune (PRE-push). Beyond the :Full-width-floor:, drop late
-            # quiet non-checking moves outside the phi_width(depth) budget. Refutation-preserving:
-            # captures and checks are ALWAYS searched -- board.gives_check(m) is the pre-push check
-            # test (the post-push is_check below is for LMR of moves that survive). This extends the
-            # existing LMR predicate (i>=4, depth>=3, quiet, non-check) from REDUCE to DROP.
-            if self.phi_widen and ply >= PHI_FULL_WIDTH_FLOOR and i >= phi_width(depth) \
+            # :Phi-widening: forward prune (PRE-push). Beyond the :Full-width-floor:, drop quiet
+            # non-checking moves; captures and checks are ALWAYS searched (refutation-preserving) --
+            # board.gives_check(m) is the pre-push check test (the post-push is_check below is for LMR
+            # of moves that survive). Two profiles:
+            #   selective : keep only the top-`sel_w` QUIET moves (sel_w tapers with ply), the bounded
+            #               spearhead -- narrows quiet branching hard so the node budget reaches deep.
+            #   base phi  : keep the top phi_width(depth) moves by ordering (Fibonacci breadth budget);
+            #               extends the existing LMR predicate (i>=4, depth>=3, quiet) from REDUCE to DROP.
+            if self.selective and ply >= PHI_FULL_WIDTH_FLOOR:
+                if not is_cap and not board.gives_check(m):
+                    if quiets_kept >= sel_w:
+                        phi_pruned = True
+                        continue
+                    quiets_kept += 1
+            elif self.phi_widen and ply >= PHI_FULL_WIDTH_FLOOR and i >= phi_width(depth) \
                     and not is_cap and not board.gives_check(m):
                 phi_pruned = True
                 continue
@@ -343,6 +418,7 @@ class AlphaBetaEngine:
             self.eval_fn.reset(board)
         self.start = time.time()
         self.nodes = 0
+        self._ext_nodes = 0        # selective-spearhead beyond-floor budget, reset per search()
         # Seed a legal fallback so we always return a legal move, even if depth 1 times out
         # (explosive quiescence at very short time limits can exceed the budget before it finishes).
         best_move = next(iter(board.legal_moves), None)
@@ -356,7 +432,20 @@ class AlphaBetaEngine:
                 return random.choice(legal), {"depth": 0, "score_cp": 0, "nodes": 0,
                                               "nps": 0, "time": 0.0, "book": True}
 
-        for depth in range(1, self.max_depth + 1):
+        # Deepening schedule. Default: standard iterative deepening 1..max_depth.
+        # SELECTIVE-SPEARHEAD: standard ID would re-search the WIDE :Full-width-floor: on EVERY pass,
+        # so the floor cost multiplies by the pass count -> the 127k blowup the spearhead exists to
+        # avoid, and the beyond-floor budget would be spent breadth-first during the shallow passes
+        # (hollow depth). Instead deepen only THROUGH the shallow tactical range (below the floor --
+        # cheap, giving an anytime fallback move + warm root ordering), then take ONE bounded
+        # selective pass straight to max_depth: the wide floor is paid exactly once and the whole
+        # beyond-floor budget funds the deep spearhead (nodes ~= floor + budget, PV reaches deep).
+        if self.selective and self.max_depth > PHI_FULL_WIDTH_FLOOR:
+            depths = list(range(1, PHI_FULL_WIDTH_FLOOR)) + [self.max_depth]
+        else:
+            depths = list(range(1, self.max_depth + 1))
+
+        for depth in depths:
             try:
                 val, mv = self._root(board, depth)
             except TimeoutError:
@@ -383,6 +472,7 @@ class AlphaBetaEngine:
         self.start = time.time()
         saved_limit, self.time_limit = self.time_limit, 1e9   # depth-bounded, not time-bounded
         self.nodes = 0
+        self._ext_nodes = 0
         try:
             val, _ = self._root(board, depth)
         except TimeoutError:
