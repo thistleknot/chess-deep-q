@@ -790,7 +790,8 @@ def main():
         print(f"final measure on BEST-visited (strength {ckb.get('strength')})", flush=True)
 
     # --- Elo objective (the ONLY strength signal Optuna maximizes) ---
-    res = measure(agent.greedy_move, f"qlearn a{ALPHA} g{GAMMA} lam{LAMBDA} wu{WARMUP} (Merge 2)",
+    res = measure(agent.greedy_move,
+                  (f"{TAG} " if TAG else "") + f"qlearn a{ALPHA} g{GAMMA} lam{LAMBDA} wu{WARMUP} (Merge 2)",
                   ELO_GAMES, merge=2)
     os.makedirs("models", exist_ok=True)
     torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),

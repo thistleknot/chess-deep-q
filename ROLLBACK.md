@@ -46,3 +46,10 @@ checkout pre-triv-restart` restores the console exactly as it was before that su
   rsearch d7 (200g CLAIMS CONFIRMATION)" to `data/rl_trend.jsonl` and MLflow when done).
 - Ladder history: `data/rl_trend.jsonl`; ledger: `data/experiments.md`; canon: `LESSONS.md`
   (1–21); MLflow: `sqlite:///mlflow.db`, runs tagged with git commits.
+
+## UI reset (post-tag, 2026-07-11)
+
+Console board wiped for the trivium-restart campaign: full 207-row ladder history moved to
+`data/archive/rl_trend_pre-triv-restart.jsonl` (+ old live metrics alongside). Every number
+in the tables above lives in that archive; restore = move the files back. Trainer rung rows
+now prefix `QLEARN_TAG` (trial3/final) so tuner trials are distinguishable on the ladder.
