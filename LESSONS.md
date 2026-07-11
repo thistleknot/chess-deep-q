@@ -107,6 +107,11 @@ day**, with the first confirmed training crowns arriving the same hour.
     crates.io revocation checks (CARGO_HTTP_CHECK_REVOKE=false); no MSVC → stable-gnu
     toolchain works with maturin/PyO3.
 
+20. **Build scripts must never write to live lineage paths.** The seed builder defaulted its
+    output onto the active lineage and overwrote the campaign-best checkpoint; git (because
+    checkpoints were committed with the code, per the mlflow-pegging directive) held the
+    restore. Parameterize outputs; treat `_best.pt` files as append-only treasure.
+
 ## The one-line version
 
 Theory first (S&B named every bug before we hit it), then stand on the strongest prior art

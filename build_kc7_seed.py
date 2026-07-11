@@ -80,9 +80,12 @@ def main():
     sd = {"head.weight": w, "head.bias": ck["state_dict"]["head.bias"].clone()}
     out = {"state_dict": sd, "arch": "linear", "enc": "kc",
            "cum_games": int(ck.get("cum_games", 4200))}
-    for p in ("models/qlearn_kc7.pt", "models/qlearn_kc7_best.pt"):
+    # LESSONS.md #20: never default onto a live lineage — output lineage is an argument
+    import sys
+    lineage = sys.argv[1] if len(sys.argv) > 1 else "kc7seed"
+    for p in (f"models/qlearn_{lineage}.pt", f"models/qlearn_{lineage}_best.pt"):
         torch.save(out, p)
-    print(f"kc7 seed: pawn_worth {pawn_worth:.4f} (unit for donor ratios); donor features set; saved")
+    print(f"seed -> lineage {lineage}: pawn_worth {pawn_worth:.4f}; donor features set; saved")
 
 
 if __name__ == "__main__":

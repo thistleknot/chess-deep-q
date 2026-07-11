@@ -114,6 +114,8 @@ class TrainReq(BaseModel):
                                   # this depth for generation moves, TDLeaf targets, predictions
     trivium: str = ""             # (q) compound target "a,b,c" = λ-return : search value : outcome
                                   # (S&B §12 averaged backups / KataGo mixed targets); "" = off
+    rsearch_mod: str = "rsearch"  # (q) native module name (rsearch2 = v2/v3 side-build)
+    zca: str = ""                 # (q) E3: path to models/zca.npz -> train in whitened space
     proxy_games: int = 20         # greedy eval games per sample (search runs: lower = cheaper samples)
     device: str = ""              # "" = trainer default; "cpu" recommended for search (small batches)
     lineage: str = ""             # checkpoint lineage name -> models/<algo>_<lineage>.pt; isolates
@@ -232,6 +234,8 @@ def api_train_start(cfg: TrainReq):
                QLEARN_KC_FAITHFUL="1" if cfg.kc_faithful else "0",
                QLEARN_RSEARCH_DEPTH=str(cfg.rsearch_depth),
                QLEARN_TRIVIUM=cfg.trivium,
+               QLEARN_RSEARCH_MOD=cfg.rsearch_mod,
+               QLEARN_ZCA=cfg.zca,
                QLEARN_PROXY_GAMES=str(cfg.proxy_games),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
                QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"

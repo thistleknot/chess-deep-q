@@ -83,6 +83,16 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # manifold -> part of every checkpoint and study identity.
 ENC_FN     = encode_features if ENC == "kc" else encode
 NIN_ENC    = NFEAT if ENC == "kc" else NIN
+ZCA        = os.environ.get("QLEARN_ZCA", "")                  # E3 (purist capacity #1): path to
+# models/zca.npz -> train in the WHITENED space x' = Z(x - mu) (conditioning only, no capacity
+# change); native searcher gets back-converted raw weights (w_raw = Z w', b_raw = b' - w_raw·mu).
+_ZCA_Z = _ZCA_MU = None
+if ZCA:
+    _z = np.load(ZCA)
+    _ZCA_Z, _ZCA_MU = _z["Z"].astype(np.float32), _z["mu"].astype(np.float32)
+    _base_enc = ENC_FN
+    def ENC_FN(board, _e=_base_enc):                           # noqa: F811 — deliberate wrap
+        return _ZCA_Z @ (_e(board) - _ZCA_MU)
 RSEARCH_MOD = os.environ.get("QLEARN_RSEARCH_MOD", "rsearch")  # native module name (rsearch2 =
 # side-built v2/v3 while the primary .pyd is file-locked by an older run)
 PARGEN     = int(os.environ.get("QLEARN_PARGEN", "0"))         # Merge 9 (spec/parallel-generation.
@@ -176,9 +186,14 @@ class QAgent:
         self._rs = None                    # native searcher, rebuilt via sync_rsearch()
 
     def weights_flat(self):
-        """(weights_list, bias) of the linear head — the native searcher's constructor diet."""
+        """(weights_list, bias) of the linear head in RAW feature space — the native searcher's
+        constructor diet. Under ZCA the head lives in whitened space; convert back."""
         w = self.net.head.weight.detach().cpu().reshape(-1).double().numpy()
-        return list(w), float(self.net.head.bias.detach().cpu().reshape(-1)[0])
+        b = float(self.net.head.bias.detach().cpu().reshape(-1)[0])
+        if _ZCA_Z is not None:
+            w_raw = _ZCA_Z.astype(np.float64) @ w
+            return list(w_raw), b - float(w_raw @ _ZCA_MU.astype(np.float64))
+        return list(w), b
 
     def sync_rsearch(self):
         """(Re)build the native Searcher from the CURRENT net weights (Merge 8). Call after
@@ -497,7 +512,8 @@ def main():
             and os.path.exists(CKPT.replace(".pt", "_best.pt"))) else CKPT
     if RESUME and os.path.exists(ckpt_path):
         ck = torch.load(ckpt_path, map_location=dev)
-        if ck.get("arch", "linear") == ARCH and ck.get("enc", "pst") == ENC:
+        if (ck.get("arch", "linear") == ARCH and ck.get("enc", "pst") == ENC
+                and bool(ck.get("zca", False)) == bool(ZCA)):
             try:
                 agent.net.load_state_dict(ck["state_dict"])
             except RuntimeError as e:                  # hidden-width / shape mismatch -> fresh net
@@ -693,7 +709,7 @@ def main():
                 gen.net.load_state_dict(agent.net.state_dict())
             gen.sync_rsearch()
             os.makedirs("models", exist_ok=True)    # per-epoch checkpoint -> a killed run resumes from here
-            torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC,
+            torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                         "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
                         "ts": int(time.time())}, CKPT)
             # Patience tracks the SAME objective Optuna maximizes: this epoch's aggregated score vs
@@ -718,7 +734,7 @@ def main():
             if strength > best_strength + 1e-3:
                 best_strength, stale = strength, 0
                 # KEEP-BEST: RL curves are non-monotone (policy->data feedback); keep the best VISITED
-                torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC,
+                torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                             "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
                             "strength": strength, "ts": int(time.time())},
                            CKPT.replace(".pt", "_best.pt"))
@@ -759,7 +775,7 @@ def main():
     res = measure(agent.greedy_move, f"qlearn a{ALPHA} g{GAMMA} lam{LAMBDA} wu{WARMUP} (Merge 2)",
                   ELO_GAMES, merge=2)
     os.makedirs("models", exist_ok=True)
-    torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC,
+    torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                 "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
                 "ts": int(time.time())}, CKPT)
 
