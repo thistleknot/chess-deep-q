@@ -87,7 +87,9 @@ def lane_env(lane, cfg):
                 QLEARN_PARGEN_THREADS=str(THREADS), QLEARN_PROXY_GAMES="4",
                 QLEARN_DEV="cpu", QLEARN_TAG=f"zero{lane.upper()}",
                 QLEARN_CKPT=f"models/qlearn_zero_{lane}.pt",
-                QLEARN_METRICS=f"data/qlearn_zero_{lane}.jsonl")
+                # control lane feeds the console's LIVE panel directly; others get own files
+                QLEARN_METRICS=("data/qlearn_metrics.jsonl" if lane == "a"
+                                else f"data/qlearn_zero_{lane}.jsonl"))
 
 
 def bar(lane):
