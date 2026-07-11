@@ -113,6 +113,14 @@ drifts on luck, honest epochs revert against phantoms, and KnightCap-scale slow 
   (Optuna objective resolution).
 - Cost: paid only on candidate bests. Guarantee: resume bars inherit confirmed values.
 
+## :Informative-patience: (efficiency plan step 2)
+
+Measured: every arm died by patience-3 on a ±5-noise 24-game epoch metric at <1,200 games
+(KnightCap ran thousands). Fix: `stale` increments ONLY on informative failures — a REJECTED
+crown check (challenged the bar and lost the pooled re-measure) or an epoch < 0.75×bar.
+Marginal below-bar epochs are noise and no longer age the run. Collapse-guard reverts
+(REVERT_FRAC) unchanged. Long-horizon arms additionally run `epoch_elo_games=24`.
+
 ## :Trivium-anneal: (operator-proposed) — scheduled compound-target weights
 
 Measured: static trivium ⅓/⅓/⅓ ignites fast, fades (E2); static 0.6/0.3/0.1 extends a

@@ -731,7 +731,9 @@ def main():
             strength = 100.0 * ep_sf_score + (wr_rand + wr_heur)
             print(f"epoch {epoch} strength: sf {ep_sf_pts}/{ep_sf_n} + proxy {wr_rand + wr_heur:.2f} "
                   f"-> {strength:.2f} (best {best_strength:.2f})", flush=True)
+            challenged = False
             if CONFIRM and sf is not None and strength > best_strength + 1e-3:
+                challenged = True
                 # :Confirmed-crown:: candidate best -> independent re-measure, pooled decision.
                 _c_elo, c_pts = greedy_elo(agent, sf, sf_lim, EPOCH_ELO_GAMES)
                 c_rand, c_heur, _cm, _ct = evaluate_greedy(agent, PROXY_GAMES)
@@ -750,7 +752,12 @@ def main():
                             "strength": strength, "ts": int(time.time())},
                            CKPT.replace(".pt", "_best.pt"))
             else:
-                stale += 1
+                # Horizon fix (efficiency plan step 2): only INFORMATIVE failures age the
+                # run — a REJECTED crown (we challenged and lost) or a clearly-below epoch
+                # (< 0.75x bar). Marginal below-bar epochs are ±5-noise and taught nothing;
+                # counting them killed every arm at <1,200 games while KnightCap ran 1000s.
+                if challenged or strength < 0.75 * best_strength:
+                    stale += 1
                 best_p = CKPT.replace(".pt", "_best.pt")
                 revert = (ANCHOR == "hard") or (ANCHOR == "1" and strength < REVERT_FRAC * best_strength)
                 if revert and os.path.exists(best_p):     # collapse (or hard gate) -> revert to anchor

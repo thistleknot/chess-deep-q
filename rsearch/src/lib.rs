@@ -407,11 +407,29 @@ impl<'a> SearchCtx<'a> {
         let mut best = f64::NEG_INFINITY;
         let mut best_mv = None;
         let mut best_leaf = board.clone();
+        let mut idx = 0usize;
         for (_, mv) in scored {
             let mut child = board.clone();
             child.play_unchecked(mv);
-            let (sc, _, leaf) = self.negamax(&child, depth - 1, ply + 1, -beta, -alpha);
-            let sc = -sc;
+            // v3.5 LMR (operator directive: depth via SELECTIVITY, not enumeration): late
+            // quiet moves search reduced with a null window; a fail-high triggers a full
+            // re-search — surprise gets rigor, boredom gets pruned, the local min stays sound.
+            let quiet = !is_capture(board, mv);
+            let (sc, leaf) = if idx >= 4 && quiet && depth >= 3 && !in_check {
+                let r: u32 = if idx >= 12 { 2 } else { 1 };
+                let (s1, _, l1) =
+                    self.negamax(&child, depth - 1 - r, ply + 1, -alpha - 1e-6, -alpha);
+                if -s1 > alpha {
+                    let (s2, _, l2) = self.negamax(&child, depth - 1, ply + 1, -beta, -alpha);
+                    (-s2, l2)
+                } else {
+                    (-s1, l1)
+                }
+            } else {
+                let (s2, _, l2) = self.negamax(&child, depth - 1, ply + 1, -beta, -alpha);
+                (-s2, l2)
+            };
+            idx += 1;
             if sc > best {
                 best = sc;
                 best_mv = Some(mv);
@@ -489,8 +507,29 @@ impl Searcher {
             history: vec![0u64; 64 * 64],
         };
         let mut result = None;
+        let mut prev = 0.0f64;
         for d in 1..=depth {
-            result = Some(ctx.negamax(&board, d, 0, f64::NEG_INFINITY, f64::INFINITY));
+            // v3.5 aspiration windows: search a narrow window around the previous iterate;
+            // widen fully on a fail — cheap when the eval is stable, safe when it is not.
+            let (mut lo, mut hi) = if d >= 3 {
+                (prev - 0.08, prev + 0.08)
+            } else {
+                (f64::NEG_INFINITY, f64::INFINITY)
+            };
+            loop {
+                let r = ctx.negamax(&board, d, 0, lo, hi);
+                if r.0 <= lo && lo.is_finite() {
+                    lo = f64::NEG_INFINITY;
+                    continue;
+                }
+                if r.0 >= hi && hi.is_finite() {
+                    hi = f64::INFINITY;
+                    continue;
+                }
+                prev = r.0;
+                result = Some(r);
+                break;
+            }
         }
         let (sc, mv, leaf) = result.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("depth 0"))?;
         let mv = mv.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no legal moves"))?;
@@ -688,9 +727,15 @@ fn play_games(
     Ok(results)
 }
 
+#[pyfunction]
+fn version() -> &'static str {
+    "v3.5-lmr-aspiration"
+}
+
 #[pymodule]
 fn rsearch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Searcher>()?;
     m.add_function(wrap_pyfunction!(play_games, m)?)?;
+    m.add_function(wrap_pyfunction!(version, m)?)?;
     Ok(())
 }
