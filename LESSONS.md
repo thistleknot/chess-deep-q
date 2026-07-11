@@ -112,6 +112,14 @@ day**, with the first confirmed training crowns arriving the same hour.
     checkpoints were committed with the code, per the mlflow-pegging directive) held the
     restore. Parameterize outputs; treat `_best.pt` files as append-only treasure.
 
+21. **"Full-width" was never the cost — the eval is.** LMR/aspiration (v3.5) was falsified
+    because alpha-beta+TT+ordering already visits ~1/160,000th of the nominal d7 tree
+    (~400k nodes at ~2M nps = 0.2s/move); there was nothing left to prune. The remaining
+    efficiency lever is per-node cost: every node recomputes all 809 features, but a linear
+    head admits exact incremental updates (v += w . delta-features, the NNUE idea) — ~10x
+    node speed = ~2 free plies = ~+250 Elo at the same clock. Full-depth *rungs* are shelved
+    as trophies; depth from here on comes from cheaper nodes, not longer clocks.
+
 ## The one-line version
 
 Theory first (S&B named every bug before we hit it), then stand on the strongest prior art
