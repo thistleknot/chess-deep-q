@@ -32,8 +32,10 @@ RESUME_POP = int(sys.argv[5]) if len(sys.argv) > 5 else 0    # 1 = continue exis
 # (weights carry over; configs re-evolve from canon/explorer/jitter — not persisted)
 GOAL_BAR = float(sys.argv[6]) if len(sys.argv) > 6 else 0.0  # stop when pop best crown bar
 # reaches this (bar 26.4 ~ 1100 on the d2-greedy Elo scale); 0 = run to the GENS cap
+LIN = sys.argv[7] if len(sys.argv) > 7 else "zero"           # lineage prefix: zero | mat —
+# separate checkpoint/metrics/tag namespaces so campaigns never overwrite each other
 
-SEED_FILE = "models/qlearn_zero_seed.pt"
+SEED_FILE = f"models/qlearn_{LIN}_seed.pt"
 TREE = "data/pathfind_tree.md"
 LANE_IDS = "abcdef"[:NLANES]
 THREADS = max(1, 12 // NLANES)
@@ -89,28 +91,28 @@ def lane_env(lane, cfg):
                 QLEARN_TAU_START=f"{cfg['tau_start']:.4f}",
                 QLEARN_TAU_FLOOR=f"{cfg['tau_floor']:.4f}",
                 QLEARN_PARGEN_THREADS=str(THREADS), QLEARN_PROXY_GAMES="4",
-                QLEARN_DEV="cpu", QLEARN_TAG=f"zero{lane.upper()}",
-                QLEARN_CKPT=f"models/qlearn_zero_{lane}.pt",
+                QLEARN_DEV="cpu", QLEARN_TAG=f"{LIN}{lane.upper()}",
+                QLEARN_CKPT=f"models/qlearn_{LIN}_{lane}.pt",
                 # control lane feeds the console's LIVE panel directly; others get own files
                 QLEARN_METRICS=("data/qlearn_metrics.jsonl" if lane == "a"
-                                else f"data/qlearn_zero_{lane}.jsonl"))
+                                else f"data/qlearn_{LIN}_{lane}.jsonl"))
 
 
 def bar(lane):
     """Confirmed-crown strength of a lane's best checkpoint (None before first crown)."""
     try:
-        return torch.load(f"models/qlearn_zero_{lane}_best.pt", map_location="cpu").get("strength")
+        return torch.load(f"models/qlearn_{LIN}_{lane}_best.pt", map_location="cpu").get("strength")
     except (FileNotFoundError, RuntimeError):
         return None
 
 
 def fork(dst, src):
     """Re-seed lane dst from lane src's best weights: new lineage — bar + optimizer stripped."""
-    ck = torch.load(f"models/qlearn_zero_{src}_best.pt", map_location="cpu")
+    ck = torch.load(f"models/qlearn_{LIN}_{src}_best.pt", map_location="cpu")
     ck.pop("strength", None)
     ck.pop("opt_state", None)
-    torch.save(ck, f"models/qlearn_zero_{dst}.pt")
-    torch.save(ck, f"models/qlearn_zero_{dst}_best.pt")
+    torch.save(ck, f"models/qlearn_{LIN}_{dst}.pt")
+    torch.save(ck, f"models/qlearn_{LIN}_{dst}_best.pt")
 
 
 def log_tree(line):
@@ -119,13 +121,38 @@ def log_tree(line):
     print(line, flush=True)
 
 
+# --- :Model-the-model: (operator, 2026-07-11) — the search gets its own value function ----
+def knob_vec(cfg):
+    """Config -> feature vector for the jitter surrogate (log-alpha, temps, mix, warmup, 1)."""
+    return np.array([math.log10(cfg["alpha"]), cfg["tau_start"], cfg["tau_floor"],
+                     cfg["c_start"], cfg["warmup"], 1.0])
+
+
+def fit_surrogate(mX, my):
+    """Ridge fit of delta-bar over knobs; None until >=6 (config, outcome) observations."""
+    if len(my) < 6:
+        return None
+    X, yv = np.array(mX), np.array(my)
+    return np.linalg.solve(X.T @ X + 0.1 * np.eye(X.shape[1]), X.T @ yv)
+
+
+def guided_jitter(gen, lane, reheat, theta):
+    """Sample 12 candidate jitters; with the surrogate fitted, take the predicted-best half
+    the time (the other half stays random — the surrogate must never own exploration)."""
+    cands = [jitter(gen * 97 + i * 7919, lane, reheat) for i in range(12)]
+    if theta is None or np.random.default_rng(1009 * gen + ord(lane)).random() < 0.5:
+        return cands[0]
+    scores = [float(knob_vec(c) @ theta) for c in cands]
+    return cands[int(np.argmax(scores))]
+
+
 def main():
     os.makedirs("data", exist_ok=True)
     if not RESUME_POP:
         seed = torch.load(SEED_FILE, map_location="cpu")
         for lane in LANE_IDS:                          # every lane starts at the SAME zero node
-            torch.save(seed, f"models/qlearn_zero_{lane}.pt")
-            torch.save(seed, f"models/qlearn_zero_{lane}_best.pt")
+            torch.save(seed, f"models/qlearn_{LIN}_{lane}.pt")
+            torch.save(seed, f"models/qlearn_{LIN}_{lane}_best.pt")
     log_tree(f"\n## Population run {time.strftime('%Y-%m-%d %H:%M')} — "
              f"{NLANES} lanes x <= {GENS} gens x {EPOCHS_PER_GEN}x{EPOCH_GAMES} games "
              f"(threads/lane {THREADS}, resume={RESUME_POP}, goal bar {GOAL_BAR or '—'})")
@@ -137,6 +164,8 @@ def main():
                       explorer() if lane == LANE_IDS[-1] else
                       jitter(0, lane)) for lane in LANE_IDS}
     reheat, prev_pop_best = 1.0, None                  # :Reheat:: stall -> raise τ, progress -> cool
+    hist = {lane: [] for lane in LANE_IDS}             # :Model-the-model: bar trajectories
+    mX, my = [], []                                    # (knobs, delta-bar) surrogate data
     for gen in range(1, GENS + 1):
         procs = {}
         for lane in LANE_IDS:
@@ -153,13 +182,31 @@ def main():
         bars = {lane: bar(lane) for lane in LANE_IDS}
         slopes = {lane: (bars[lane] - prev[lane]) if (bars[lane] is not None and prev[lane] is not None)
                   else None for lane in LANE_IDS}
-        ranked = sorted(LANE_IDS, key=lambda l: (bars[l] is not None, bars[l] or -1e9), reverse=True)
+        for lane in LANE_IDS:                          # :Model-the-model: observe outcomes
+            if bars[lane] is not None:
+                hist[lane].append(bars[lane])
+            if slopes[lane] is not None:
+                mX.append(knob_vec(configs[lane]))
+                my.append(slopes[lane])
+        theta = fit_surrogate(mX, my)
+
+        def predicted(lane):
+            """FIRE-style rank: current bar + 3-gen trajectory extrapolation (falls back to
+            the bar itself while a lane's post-fork history is too short to model)."""
+            if bars[lane] is None:
+                return -1e9
+            h = hist[lane]
+            if len(h) < 2:
+                return bars[lane]
+            return bars[lane] + 3.0 * float(np.mean(np.diff(h[-4:])))
+
+        ranked = sorted(LANE_IDS, key=predicted, reverse=True)
         best_slope = max((l for l in LANE_IDS if slopes[l] is not None),
                          key=lambda l: slopes[l], default=None)
         top = ranked[0]
         prune = [l for l in ranked[-(NLANES // 2):] if l != best_slope and l != top]
 
-        pop_best = bars[ranked[0]]
+        pop_best = max((b for b in bars.values() if b is not None), default=None)
         if GOAL_BAR > 0 and pop_best is not None and pop_best >= GOAL_BAR:
             log_tree(f"| {gen} | — | GOAL REACHED: pop best {pop_best:.2f} >= {GOAL_BAR} "
                      f"(~1100 d2-greedy) | — | — |")
@@ -183,18 +230,21 @@ def main():
                       "slope-guard" if lane == best_slope and lane in ranked[-(NLANES // 2):] else
                       f"PRUNED -> fork({top})" if lane in prune else "keep")
             b = "—" if bars[lane] is None else f"{bars[lane]:.2f}"
-            log_tree(f"| {gen} | {lane} | {desc} | {b} | {action} |")
+            p = predicted(lane)
+            pd = "" if (bars[lane] is None or abs(p - bars[lane]) < 1e-6) else f" pred{p:.1f}"
+            log_tree(f"| {gen} | {lane} | {desc} | {b}{pd} | {action} |")
 
         if gen < GENS:
             for lane in prune:
                 fork(lane, top)
+                hist[lane] = []                        # forked lane = new trajectory
                 configs[lane] = (explorer(reheat) if lane == LANE_IDS[-1]
-                                 else jitter(gen, lane, reheat))
+                                 else guided_jitter(gen, lane, reheat, theta))
             prev = dict(bars)
 
     log_tree(f"| — | — | final ranking: {' > '.join(ranked)} | {bars[ranked[0]]} | "
-             f"winner models/qlearn_zero_{ranked[0]}_best.pt |")
-    print(f"\nWINNER lane {ranked[0]}: models/qlearn_zero_{ranked[0]}_best.pt "
+             f"winner models/qlearn_{LIN}_{ranked[0]}_best.pt |")
+    print(f"\nWINNER lane {ranked[0]}: models/qlearn_{LIN}_{ranked[0]}_best.pt "
           f"(bar {bars[ranked[0]]}) — next: purist + d7 rungs")
 
 
