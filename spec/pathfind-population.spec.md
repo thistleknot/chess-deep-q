@@ -75,10 +75,13 @@ wash-out under function approximation (DOIE lineage), KnightCap's own material-o
 
 ## Pre-registered verdicts
 
-1. **Ignition**: some lane's confirmed crown ≥ first crown + 10 by 10k population-games,
-   else verdict "trivium cannot ignite from optimistic zero" → council convenes; fallback
-   rung = MATERIAL-ONLY seed (1,4,4,6,12 — the donor paper's own from-scratch start,
-   paper-faithful, still no trained/distilled weights).
+1. **Ignition**: some lane's confirmed crown ≥ its first crown + 10 by **10k games PER LANE
+   (generation 5)**, else verdict "trivium cannot ignite from optimistic zero" → council
+   convenes; fallback rung = MATERIAL-ONLY seed (1,4,4,6,12 — the donor paper's own
+   from-scratch start, paper-faithful, still no trained/distilled weights).
+   *(AMENDED 2026-07-11 during gen 3, disclosed: originally "10k population-games" — an
+   authoring error equal to 2.5k/lane, a window in which no arm in campaign history moved
+   +10. Evidence at amendment time: pop best 5.92→5.92→9.27, trending but not +10.)*
 2. **Pathfinding win**: winner's purist/crown within CI overlap of the donor-seeded arm
    (purist 982 (894..1046), crown 40.89) = the weights were FOUND, not inherited. Beating it
    = headline. Either way the winner gets purist + d7 scout + (if in-band) 200g claims.
