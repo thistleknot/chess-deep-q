@@ -36,10 +36,15 @@ def elo_diff(s, n=None):
 
 
 def play(agent_move, opp_move, games, cap=PLY_CAP):
-    """Agent vs opponent, alternating colors. Return (W, D, L, avg_plies) from the AGENT's perspective."""
+    """Agent vs opponent, alternating colors. Return (W, D, L, avg_plies) from the AGENT's
+    perspective. Emits a heartbeat line every 10 games (stall detection for slow/deep agents)."""
     W = D = L = 0
     plies_total = 0
+    t0 = time.time()
     for g in range(games):
+        if g and g % 10 == 0:
+            print(f"    ...game {g}/{games}  {W}W-{D}D-{L}L  {plies_total/g:.0f} plies/game  "
+                  f"{(time.time()-t0)/g:.1f}s/game", flush=True)
         agent_white = (g % 2 == 0)
         b = chess.Board()
         plies = 0
@@ -121,7 +126,7 @@ def measure(agent_move, agent_name, games, merge=0):
         fh.write(json.dumps(row) + "\n")
     try:                                   # MLflow mirror (local ./mlruns): every rung = one run,
         import mlflow                      # tagged with the commit — NEVER fatal to a measurement
-        mlflow.set_tracking_uri("file:mlruns")
+        mlflow.set_tracking_uri("sqlite:///mlflow.db")
         mlflow.set_experiment("chess-rl-elo")
         with mlflow.start_run(run_name=agent_name):
             mlflow.set_tags({"git_commit": commit or "dirty/unknown", "merge": merge})

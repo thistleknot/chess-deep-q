@@ -29,6 +29,23 @@ gradient" that reorders the queue). Grading per spec/expectations.spec.md.
 Standing exit: any arm that produces a CONFIRMED crown trend gets extended (ride the
 gradient) instead of dequeuing.
 
+## Two lanes (operator directive, 2026-07-10: "full search feels like cheating")
+
+- **Engine lane**: search allowed at inference; objective = the 1428–1672 band. Search is
+  the teacher AND the player.
+- **Purist lane**: RAW 1-PLY greedy Elo — the no-cheating learning metric. TDLeaf's job is
+  compressing search knowledge INTO the eval; every trained checkpoint gets a 1-ply rung.
+  Purist-lane capacity queue (operator SUGGESTIONS — sequential, ONE per arm, never
+  stacked; each needs a council-grounding pass + pre-registered falsification before launch):
+  1. ZCA whitening of the binary planes — conditioning only (no capacity change); failure
+     falsifies "optimization conditioning was the gap".
+  2. Kanerva coding (prototype/sparse-distributed features) — nonlinear capacity, linear
+     model preserved; enters only if pure conditioning failed.
+  3. RBF features — Kanerva's tunable cousin; only if prototypes show signal.
+  All from-scratch compliant. Enter AFTER the deep-target arm's purist rungs plateau
+  (3 consecutive flat 1-ply rungs on crowned checkpoints), not before — signal first,
+  capacity second (measured lesson).
+
 ## :Sidecar: — the intern (TextGrad/DSPy-style advisor, zero new infrastructure)
 
 A cheap LLM subagent acts as proposal generator; the primary agent stays the decision layer.

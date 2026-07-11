@@ -257,9 +257,35 @@ fn uci(board: &Board, mv: Move) -> String {
     format!("{}", mv)
 }
 
+// --- v2 (spec :Depth-per-second:): transposition table, killers, history, null move -------
+const TT_BITS: usize = 20;                            // 2^20 entries
+const TT_SIZE: usize = 1 << TT_BITS;
+const BOUND_EXACT: u8 = 0;
+const BOUND_LOWER: u8 = 1;
+const BOUND_UPPER: u8 = 2;
+const MAX_PLY: usize = 64;
+
+#[derive(Clone, Copy)]
+struct TtEntry {
+    key: u64,
+    depth: i32,
+    score: f64,
+    bound: u8,
+    mv: Option<Move>,
+}
+
+impl Default for TtEntry {
+    fn default() -> Self {
+        TtEntry { key: 0, depth: -1, score: 0.0, bound: BOUND_EXACT, mv: None }
+    }
+}
+
 struct SearchCtx<'a> {
     eval: &'a Eval,
     nodes: u64,
+    tt: &'a mut Vec<TtEntry>,
+    killers: [[Option<Move>; 2]; MAX_PLY],
+    history: Vec<u64>,                                // from*64+to
 }
 
 impl<'a> SearchCtx<'a> {
@@ -300,8 +326,16 @@ impl<'a> SearchCtx<'a> {
         (best, best_leaf)
     }
 
-    /// returns (score_stm, best_move, leaf_board)
-    fn negamax(&mut self, board: &Board, depth: u32, mut alpha: f64, beta: f64) -> (f64, Option<Move>, Board) {
+    /// returns (score_stm, best_move, leaf_board). v2: TT (cutoffs at NON-PV nodes only, so
+    /// the PV leaf stays exact for training), TT-move/killer/history ordering, null-move R=2.
+    fn negamax(
+        &mut self,
+        board: &Board,
+        depth: u32,
+        ply: usize,
+        mut alpha: f64,
+        beta: f64,
+    ) -> (f64, Option<Move>, Board) {
         self.nodes += 1;
         let moves = moves_of(board);
         if moves.is_empty() {
@@ -316,20 +350,67 @@ impl<'a> SearchCtx<'a> {
             let (sc, leaf) = self.qsearch(board, alpha, beta);
             return (sc, None, leaf);
         }
-        // order: captures by victim value first
-        let mut ordered = moves;
-        ordered.sort_by(|&a, &b| {
-            let ca = if is_capture(board, a) { victim_value(board, a) } else { -1.0 };
-            let cb = if is_capture(board, b) { victim_value(board, b) } else { -1.0 };
-            cb.partial_cmp(&ca).unwrap()
-        });
+        let is_pv = beta - alpha > 1e-6 * 2.0;             // null-window nodes are non-PV
+        let key = board.hash();
+        let slot = (key as usize) & (self.tt.len() - 1);   // mask by ACTUAL table size (per-game
+                                                           // tables in play_games are smaller)
+        let mut tt_mv: Option<Move> = None;
+        {
+            let e = &self.tt[slot];
+            if e.key == key && e.depth >= 0 {
+                tt_mv = e.mv;
+                if !is_pv && e.depth >= depth as i32 && e.score.abs() < MATE - 1.0 {
+                    match e.bound {
+                        BOUND_EXACT => return (e.score, e.mv, board.clone()),
+                        BOUND_LOWER if e.score >= beta => return (e.score, e.mv, board.clone()),
+                        BOUND_UPPER if e.score <= alpha => return (e.score, e.mv, board.clone()),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        // null-move pruning: not in check, not a pawn-only endgame, non-PV, enough depth
+        let in_check = board.checkers() != BitBoard::EMPTY;
+        if !is_pv && !in_check && depth >= 3 {
+            let stm = board.side_to_move();
+            let heavy = bb_u64(board.colors(stm))
+                & !bb_u64(board.pieces(Piece::Pawn))
+                & !bb_u64(board.pieces(Piece::King));
+            if heavy != 0 {
+                if let Some(nb) = board.null_move() {
+                    let (sc, _, _) = self.negamax(&nb, depth - 3, ply + 1, -beta, -beta + 1e-6);
+                    if -sc >= beta {
+                        return (beta, None, board.clone());
+                    }
+                }
+            }
+        }
+        // ordering: TT move, captures (MVV-LVA), killers, history-scored quiets
+        let mut scored: Vec<(f64, Move)> = moves
+            .into_iter()
+            .map(|m| {
+                let s = if Some(m) == tt_mv {
+                    1e12
+                } else if is_capture(board, m) {
+                    1e9 + victim_value(board, m) * 100.0
+                        - board.piece_on(m.from).map(|p| TYPE_VAL[p as usize]).unwrap_or(0.0)
+                } else if ply < MAX_PLY && self.killers[ply].contains(&Some(m)) {
+                    1e6
+                } else {
+                    self.history[(m.from as usize) * 64 + (m.to as usize)] as f64
+                };
+                (s, m)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let alpha0 = alpha;
         let mut best = f64::NEG_INFINITY;
         let mut best_mv = None;
         let mut best_leaf = board.clone();
-        for mv in ordered {
+        for (_, mv) in scored {
             let mut child = board.clone();
             child.play_unchecked(mv);
-            let (sc, _, leaf) = self.negamax(&child, depth - 1, -beta, -alpha);
+            let (sc, _, leaf) = self.negamax(&child, depth - 1, ply + 1, -beta, -alpha);
             let sc = -sc;
             if sc > best {
                 best = sc;
@@ -340,8 +421,26 @@ impl<'a> SearchCtx<'a> {
                 alpha = sc;
             }
             if alpha >= beta {
+                if !is_capture(board, mv) && ply < MAX_PLY {
+                    if self.killers[ply][0] != Some(mv) {
+                        self.killers[ply][1] = self.killers[ply][0];
+                        self.killers[ply][0] = Some(mv);
+                    }
+                    self.history[(mv.from as usize) * 64 + (mv.to as usize)] +=
+                        (depth as u64) * (depth as u64);
+                }
                 break;
             }
+        }
+        if best.abs() < MATE - 1.0 {
+            let bound = if best <= alpha0 {
+                BOUND_UPPER
+            } else if best >= beta {
+                BOUND_LOWER
+            } else {
+                BOUND_EXACT
+            };
+            self.tt[slot] = TtEntry { key, depth: depth as i32, score: best, bound, mv: best_mv };
         }
         (best, best_mv, best_leaf)
     }
@@ -350,6 +449,7 @@ impl<'a> SearchCtx<'a> {
 #[pyclass]
 struct Searcher {
     eval: Eval,
+    tt: Vec<TtEntry>,                                  // persists across calls (reuse within a game)
 }
 
 #[pymethods]
@@ -365,7 +465,7 @@ impl Searcher {
         }
         let mut w = [0.0; NFEAT];
         w.copy_from_slice(&weights);
-        Ok(Searcher { eval: Eval { w, bias } })
+        Ok(Searcher { eval: Eval { w, bias }, tt: vec![TtEntry::default(); TT_SIZE] })
     }
 
     /// White-absolute pre-tanh score of a FEN (parity testing)
@@ -377,14 +477,20 @@ impl Searcher {
     }
 
     /// (best_uci, white_value_tanh, leaf_fen, predicted_reply_uci, nodes)
-    fn search(&self, fen: &str, depth: u32) -> PyResult<(String, f64, String, String, u64)> {
+    fn search(&mut self, fen: &str, depth: u32) -> PyResult<(String, f64, String, String, u64)> {
         let board: Board = fen
             .parse()
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("bad fen: {e:?}")))?;
-        let mut ctx = SearchCtx { eval: &self.eval, nodes: 0 };
+        let mut ctx = SearchCtx {
+            eval: &self.eval,
+            nodes: 0,
+            tt: &mut self.tt,
+            killers: [[None; 2]; MAX_PLY],
+            history: vec![0u64; 64 * 64],
+        };
         let mut result = None;
         for d in 1..=depth {
-            result = Some(ctx.negamax(&board, d, f64::NEG_INFINITY, f64::INFINITY));
+            result = Some(ctx.negamax(&board, d, 0, f64::NEG_INFINITY, f64::INFINITY));
         }
         let (sc, mv, leaf) = result.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("depth 0"))?;
         let mv = mv.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no legal moves"))?;
@@ -392,7 +498,7 @@ impl Searcher {
         let mut child = board.clone();
         child.play_unchecked(mv);
         let pred = if depth >= 2 {
-            let (_, pm, _) = ctx.negamax(&child, depth - 1, f64::NEG_INFINITY, f64::INFINITY);
+            let (_, pm, _) = ctx.negamax(&child, depth - 1, 0, f64::NEG_INFINITY, f64::INFINITY);
             pm.map(|m| uci(&child, m)).unwrap_or_default()
         } else {
             String::new()
@@ -408,8 +514,183 @@ impl Searcher {
     }
 }
 
+// --- Merge 9 (spec/parallel-generation.spec.md): native parallel game generation ----------
+struct XorShift(u64);
+
+impl XorShift {
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % (n as u64)) as usize
+    }
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / ((1u64 << 53) as f64)
+    }
+}
+
+/// one generation game; returns (z_white, agent_white, per-agent-move records)
+/// record = (leaf_fen, white_value, predicted: was the reply to the PREVIOUS agent move the
+/// one its search expected). opp_depth 0 = uniform-random opponent.
+#[allow(clippy::too_many_arguments)]
+fn play_one(
+    agent: &Eval,
+    opp: &Eval,
+    opp_depth: u32,
+    depth: u32,
+    eps: f64,
+    ply_cap: u32,
+    seed: u64,
+    agent_white: bool,
+) -> (f64, bool, Vec<(String, f64, bool)>) {
+    let mut rng = XorShift(seed | 1);
+    let mut tt_a = vec![TtEntry::default(); 1 << 16];
+    let mut tt_o = vec![TtEntry::default(); 1 << 16];
+    let mut board = Board::default();
+    let mut recs: Vec<(String, f64, bool)> = Vec::with_capacity(64);
+    let mut pending_pred: Option<Move> = None;
+    let mut reply_actual: Option<Move> = None;
+    let mut plies = 0u32;
+    let z;
+    loop {
+        let moves = moves_of(&board);
+        if moves.is_empty() {
+            z = if board.checkers() != BitBoard::EMPTY {
+                if board.side_to_move() == Color::White { -1.0 } else { 1.0 }
+            } else {
+                0.0
+            };
+            break;
+        }
+        if plies >= ply_cap {
+            z = 0.0;
+            break;
+        }
+        let my_turn = (board.side_to_move() == Color::White) == agent_white;
+        let mv;
+        if my_turn {
+            if eps > 0.0 && rng.unit() < eps {
+                mv = moves[rng.below(moves.len())];         // ε: state-coverage exploration
+                let predicted = pending_pred.is_some() && reply_actual == pending_pred;
+                let _ = predicted;                          // ε-moves record nothing (no search value)
+                pending_pred = None;
+                reply_actual = None;
+            } else {
+                let mut ctx = SearchCtx {
+                    eval: agent,
+                    nodes: 0,
+                    tt: &mut tt_a,
+                    killers: [[None; 2]; MAX_PLY],
+                    history: vec![0u64; 64 * 64],
+                };
+                let (sc, bm, leaf) = ctx.negamax(&board, depth, 0, f64::NEG_INFINITY, f64::INFINITY);
+                let best = bm.unwrap_or(moves[0]);
+                let predicted = pending_pred.is_some() && reply_actual == pending_pred;
+                let white_val = if board.side_to_move() == Color::White { sc } else { -sc };
+                recs.push((format!("{leaf}"), white_val.clamp(-1.0, 1.0), predicted));
+                // predicted reply for the NEXT record: child's best at depth-1
+                let mut child = board.clone();
+                child.play_unchecked(best);
+                pending_pred = if depth >= 2 {
+                    let (_, pm, _) = ctx.negamax(&child, depth - 1, 0, f64::NEG_INFINITY, f64::INFINITY);
+                    pm
+                } else {
+                    None
+                };
+                reply_actual = None;
+                mv = best;
+            }
+        } else {
+            if opp_depth == 0 {
+                mv = moves[rng.below(moves.len())];
+            } else {
+                let mut ctx = SearchCtx {
+                    eval: opp,
+                    nodes: 0,
+                    tt: &mut tt_o,
+                    killers: [[None; 2]; MAX_PLY],
+                    history: vec![0u64; 64 * 64],
+                };
+                let (_, bm, _) = ctx.negamax(&board, opp_depth, 0, f64::NEG_INFINITY, f64::INFINITY);
+                mv = bm.unwrap_or(moves[0]);
+            }
+            if reply_actual.is_none() {
+                reply_actual = Some(mv);
+            }
+        }
+        board.play_unchecked(mv);
+        plies += 1;
+    }
+    (z, agent_white, recs)
+}
+
+/// Parallel generation: n_games across `threads` OS threads. Opponent = (opp_weights, opp_depth);
+/// opp_depth 0 ignores opp_weights (uniform random). Returns [(z, agent_white,
+/// [(leaf_fen, white_value, predicted)])]. seed varies per game; colors alternate.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn play_games(
+    py: Python<'_>,
+    weights: Vec<f64>,
+    bias: f64,
+    opp_weights: Vec<f64>,
+    opp_bias: f64,
+    opp_depth: u32,
+    n_games: usize,
+    threads: usize,
+    depth: u32,
+    eps: f64,
+    ply_cap: u32,
+    seed: u64,
+) -> PyResult<Vec<(f64, bool, Vec<(String, f64, bool)>)>> {
+    if weights.len() != NFEAT || opp_weights.len() != NFEAT {
+        return Err(pyo3::exceptions::PyValueError::new_err("weights must be 809-dim"));
+    }
+    let mut wa = [0.0; NFEAT];
+    wa.copy_from_slice(&weights);
+    let mut wo = [0.0; NFEAT];
+    wo.copy_from_slice(&opp_weights);
+    let agent = Eval { w: wa, bias };
+    let opp = Eval { w: wo, bias: opp_bias };
+    let results = py.allow_threads(|| {
+        let agent = &agent;
+        let opp = &opp;
+        let nt = threads.max(1);
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            for t in 0..nt {
+                handles.push(s.spawn(move || {
+                    let mut out = Vec::new();
+                    let mut g = t;
+                    while g < n_games {
+                        out.push((
+                            g,
+                            play_one(agent, opp, opp_depth, depth, eps, ply_cap,
+                                     seed.wrapping_add(g as u64).wrapping_mul(0x9E3779B97F4A7C15),
+                                     g % 2 == 0),
+                        ));
+                        g += nt;
+                    }
+                    out
+                }));
+            }
+            let mut all: Vec<(usize, (f64, bool, Vec<(String, f64, bool)>))> =
+                handles.into_iter().flat_map(|h| h.join().unwrap()).collect();
+            all.sort_by_key(|x| x.0);
+            all.into_iter().map(|x| x.1).collect::<Vec<_>>()
+        })
+    });
+    Ok(results)
+}
+
 #[pymodule]
 fn rsearch(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Searcher>()?;
+    m.add_function(wrap_pyfunction!(play_games, m)?)?;
     Ok(())
 }

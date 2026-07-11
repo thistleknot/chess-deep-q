@@ -112,6 +112,8 @@ class TrainReq(BaseModel):
                                   # tdleaf+ramp, online per-game SGD, fixed lam=.7 gamma=1, greedy)
     rsearch_depth: int = 0        # (q) Merge 8: >0 = native full-width alpha-beta+quiescence at
                                   # this depth for generation moves, TDLeaf targets, predictions
+    trivium: str = ""             # (q) compound target "a,b,c" = λ-return : search value : outcome
+                                  # (S&B §12 averaged backups / KataGo mixed targets); "" = off
     proxy_games: int = 20         # greedy eval games per sample (search runs: lower = cheaper samples)
     device: str = ""              # "" = trainer default; "cpu" recommended for search (small batches)
     lineage: str = ""             # checkpoint lineage name -> models/<algo>_<lineage>.pt; isolates
@@ -229,6 +231,7 @@ def api_train_start(cfg: TrainReq):
                QLEARN_RAMP="1" if cfg.ramp else "0",
                QLEARN_KC_FAITHFUL="1" if cfg.kc_faithful else "0",
                QLEARN_RSEARCH_DEPTH=str(cfg.rsearch_depth),
+               QLEARN_TRIVIUM=cfg.trivium,
                QLEARN_PROXY_GAMES=str(cfg.proxy_games),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
                QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"
@@ -538,7 +541,7 @@ async function pollLadder(){
     const svg=document.getElementById('p-ladder');
     if(!rows.length){svg.innerHTML=''; document.getElementById('lad-table').innerHTML='';}
     else{
-      const isSearch=x=>/search/i.test(x.agent||'');
+      const isSearch=x=>/search|rsearch/i.test(x.agent||'')&&!/no search|1-?ply|purist/i.test(x.agent||'');
       // ---- chart: one point per measurement, whiskers = CI, color by agent kind ----
       const w=1000,h=180,padL=44,padR=10,padT=12,padB=16;
       const los=rows.map(x=>x.elo_lo!=null?x.elo_lo:x.elo), his=rows.map(x=>x.elo_hi!=null?x.elo_hi:x.elo);

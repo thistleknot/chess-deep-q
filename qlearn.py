@@ -27,6 +27,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import chess
+import chess.engine
 
 from chess_rl import ChessEnv
 from cem_loop import encode, encode_features, NIN, NFEAT
@@ -82,10 +83,23 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # manifold -> part of every checkpoint and study identity.
 ENC_FN     = encode_features if ENC == "kc" else encode
 NIN_ENC    = NFEAT if ENC == "kc" else NIN
+RSEARCH_MOD = os.environ.get("QLEARN_RSEARCH_MOD", "rsearch")  # native module name (rsearch2 =
+# side-built v2/v3 while the primary .pyd is file-locked by an older run)
+PARGEN     = int(os.environ.get("QLEARN_PARGEN", "0"))         # Merge 9 (spec/parallel-generation.
+# spec.md): >0 = generate games in native parallel batches of this size (play_games); opponent =
+# frozen SELF at QLEARN_PARGEN_OPP_D (0=random); SF/graded rungs remain the python serial path,
+# so PARGEN and OPP=graded are mutually exclusive by construction.
+PARGEN_OPP_D = int(os.environ.get("QLEARN_PARGEN_OPP_D", "1"))
+PARGEN_EPS = float(os.environ.get("QLEARN_PARGEN_EPS", "0.1")) # ε: state-coverage exploration
+PARGEN_THREADS = int(os.environ.get("QLEARN_PARGEN_THREADS", "12"))
 RSEARCH_D  = int(os.environ.get("QLEARN_RSEARCH_DEPTH", "0"))  # Merge 8 (spec/rust-search.spec.md):
 # >0 -> generation/measurement moves, TDLeaf leaf targets, and predicted replies come from the
 # native FULL-WIDTH alpha-beta + quiescence at this depth (KnightCap-grade targets). Greedy
 # behavior (no softmax) — faithful mode's semantics. Requires enc=kc + linear arch.
+TRIVIUM    = os.environ.get("QLEARN_TRIVIUM", "")              # "a,b,c" (sum 1) -> compound target
+# (S&B §12 averaged backups; KataGo mixed value targets): G = a·λ-return + b·search value at t
+# + c·final outcome z. "" = off (pure λ-return). Operator-proposed uniform trivium = "0.34,0.33,0.33".
+_TRIV = tuple(float(x) for x in TRIVIUM.split(",")) if TRIVIUM else None
 RAMP       = os.environ.get("QLEARN_RAMP", "0") == "1"         # spec :Ramp-filter: (KnightCap td.c,
 # RAMP_FACTOR=0): favorable temporal differences on UNPREDICTED opponent moves are zeroed —
 # opponent blunders teach nothing; unfavorable surprises always teach. Terminal difference is
@@ -161,16 +175,21 @@ class QAgent:
         self.net = ValueNet(arch, HIDDEN, NIN_ENC).to(dev)
         self._rs = None                    # native searcher, rebuilt via sync_rsearch()
 
+    def weights_flat(self):
+        """(weights_list, bias) of the linear head — the native searcher's constructor diet."""
+        w = self.net.head.weight.detach().cpu().reshape(-1).double().numpy()
+        return list(w), float(self.net.head.bias.detach().cpu().reshape(-1)[0])
+
     def sync_rsearch(self):
         """(Re)build the native Searcher from the CURRENT net weights (Merge 8). Call after
         every weight load/sync on the net that generates games (init, epoch sync, revert)."""
         if RSEARCH_D <= 0:
             return
         assert ARCH == "linear" and ENC == "kc", "rsearch requires linear arch + kc encoding"
-        from rsearch import Searcher
-        w = self.net.head.weight.detach().cpu().reshape(-1).double().numpy()
-        b = float(self.net.head.bias.detach().cpu().reshape(-1)[0])
-        self._rs = Searcher(list(w), b)
+        import importlib
+        Searcher = importlib.import_module(RSEARCH_MOD).Searcher
+        w, b = self.weights_flat()
+        self._rs = Searcher(w, b)
 
     @torch.no_grad()
     def afterstate_values(self, board):
@@ -359,6 +378,9 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
         dones[-1] = True
         boot = [gvs[k + 1] if k + 1 < T else 0.0 for k in range(T)]
         G = lambda_return(rewards, boot, dones, lam, gamma=GAMMA)
+        if _TRIV is not None:
+            a, b, c = _TRIV
+            G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
         return xs, G
     deltas = [0.0] * T
     for k in range(T):
@@ -372,6 +394,9 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
     for k in range(T - 1, -1, -1):                             # G_k = gv_k + Σ (γλ)^{j-k} δ_j
         acc = deltas[k] + GAMMA * lam * acc
         G[k] = gvs[k] + acc
+    if _TRIV is not None:                                      # compound target (operator trivium):
+        a, b, c = _TRIV                                        # λ-return : search value : outcome
+        G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
     return xs, G
 
 
@@ -508,7 +533,6 @@ def main():
     sf, sf_lim = None, None
     if EPOCH_ELO_GAMES > 0:
         import glob
-        import chess.engine
         sfp = glob.glob("engines/**/stockfish*.exe", recursive=True)
         if sfp:
             try:                                   # never hang a run on an unresponsive UCI handshake
@@ -541,19 +565,38 @@ def main():
     t = time.time()
     while games_played < total_games:
         chunk = min(batch_games, total_games - games_played, epoch_games - ep_games)
+        tau = tau_at(games_played, total_games, cum_games)     # metrics row + serial behavior
         new_pairs = []
-        for _ in range(chunk):
-            tau = tau_at(games_played, total_games, cum_games)
-            if ladder is not None:
-                aw = (games_played % 2 == 0)                   # alternate colors vs the ladder
-                reach = (OPP_REACH > 0 and ladder.i < len(ladder.rungs) - 1
-                         and rng.random() < OPP_REACH)         # spec :Opponent-diet:
-                opp_fn = ladder.rungs[ladder.i + 1][1] if reach else ladder.move_fn()
-                xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env, opp_fn, aw)
-                if not reach:                                  # window = rung-MATCHED games only
-                    ladder.report(0.5 if z == 0.0 else (1.0 if (z > 0) == aw else 0.0))
-            else:
-                xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env)
+        game_data = []                          # per game: (xs, gvs, z, predicted, signs)
+        if PARGEN > 0:
+            # Merge 9: native parallel batch — greedy+ε behavior, exact-min targets, TDLeaf
+            # records; opponent = frozen self at PARGEN_OPP_D (0 = random)
+            import importlib
+            _pg = importlib.import_module(RSEARCH_MOD).play_games
+            gw, gb = gen.weights_flat()
+            batch = _pg(gw, gb, gw, gb, PARGEN_OPP_D, chunk, PARGEN_THREADS,
+                        max(RSEARCH_D, 2), PARGEN_EPS, PLY_CAP,
+                        (SEED + 1) * 1_000_003 + cum_games + games_played)
+            for z, aw, recs in batch:
+                game_data.append(([ENC_FN(chess.Board(f)) for f, _v, _p in recs],
+                                  [v for _f, v, _p in recs], z,
+                                  [p for _f, _v, p in recs],
+                                  [1.0 if aw else -1.0] * len(recs)))
+        else:
+            for _ in range(chunk):
+                tau = tau_at(games_played, total_games, cum_games)
+                if ladder is not None:
+                    aw = (games_played % 2 == 0)               # alternate colors vs the ladder
+                    reach = (OPP_REACH > 0 and ladder.i < len(ladder.rungs) - 1
+                             and rng.random() < OPP_REACH)     # spec :Opponent-diet:
+                    opp_fn = ladder.rungs[ladder.i + 1][1] if reach else ladder.move_fn()
+                    xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env, opp_fn, aw)
+                    if not reach:                              # window = rung-MATCHED games only
+                        ladder.report(0.5 if z == 0.0 else (1.0 if (z > 0) == aw else 0.0))
+                else:
+                    xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env)
+                game_data.append((xs, gvs, z, pred_f, sgn))
+        for xs, gvs, z, pred_f, sgn in game_data:
             zs_log.append(z)
             xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn)
             for x, g in zip(xt, G):

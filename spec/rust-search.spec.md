@@ -29,7 +29,19 @@ The last untested KnightCap recipe line (deep, full-width, quiescence-resolved t
    faithful-mode training rules, graded+reach opponents → rungs. ALSO: 60g inference rung of
    the existing champion/kc7 eval driven by rsearch at d5 — search-side Elo readout for free.
 
-## Non-goals (v1)
+## v2 (:Depth-per-second: — the verdict demanded it: d6 ≈ 1s/move is the scaling wall)
 
-TT, killer/history heuristics, parallel search, NNUE-style incremental eval — only if the
-arm's verdict demands more depth per second.
+- **Transposition table**: Zobrist hashing (piece-square keys + side + castling + ep file),
+  fixed-size 2^22-entry table, replace-always, stores (key, depth, score, bound, best move).
+- **Move ordering**: TT move first, then MVV-LVA captures, then killer moves (2/ply), then
+  history-scored quiets.
+- **Null-move pruning**: R=2, skipped when side to move is in check or has only K+P material.
+- Target: effective branching ≤ 3 → d8-d9 at ≤ 1s/move. Same API, same eval, parity tests
+  and mate tests must still pass; d1 unchanged by construction.
+- Deploy constraint: the .pyd is file-locked by running trainers — `cargo build` to verify,
+  `maturin develop` only between runs.
+
+## Non-goals (v2)
+
+Parallel search, aspiration windows, LMR, NNUE-style incremental eval — next tier, only if
+d8-d9 still isn't enough after the trained eval lands.

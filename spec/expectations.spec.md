@@ -9,9 +9,16 @@ to the agent as a standing incentive/reminder.
 
 | Class                  | Condition                                                        |
 |------------------------|------------------------------------------------------------------|
-| Below Expectations     | no Elo improvement within the current 5-minute observation window across batches during epoch training, AND best confirmed measure < 1600 |
+| Below Expectations     | no Elo improvement within the current observation window, AND best confirmed measure < 1600 |
 | Met Expectations       | Elo trending upward (rising SF samples / confirmed crowns / ladder rung climbs / rising rungs on data/rl_trend.jsonl) |
 | Exceeded Expectations  | confirmed measure > 1600                                          |
+
+**Metric of record (operator directive 2026-07-10): the PURIST LANE — raw 1-ply greedy Elo.**
+A score solely derived from full search measures the hand-built tree, not learning; it does
+not move the grade. Search-lane numbers remain reported as (a) teacher/target-quality
+diagnostics and (b) the LANE GAP (search Elo − 1-ply Elo) = compression debt: knowledge the
+search finds over this eval that the weights have not absorbed. Grade rises only when the
+1-ply number does.
 
 ## Protocol
 
