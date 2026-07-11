@@ -583,6 +583,7 @@ fn play_one(
     opp_depth: u32,
     depth: u32,
     eps: f64,
+    tau: f64,
     ply_cap: u32,
     seed: u64,
     agent_white: bool,
@@ -629,20 +630,60 @@ fn play_one(
                 };
                 let (sc, bm, leaf) = ctx.negamax(&board, depth, 0, f64::NEG_INFINITY, f64::INFINITY);
                 let best = bm.unwrap_or(moves[0]);
+                // :Softmax-tau: (Merge 11): optimism-directed exploration — sample the move
+                // ∝ exp(σ·v1/τ) over 1-ply afterstate values. Inflated (optimistic-init)
+                // values attract visits until data deflates them toward truth; τ scales how
+                // strongly value differences steer. A non-best sample records nothing (the
+                // search value describes best play, not the sampled move — same contract as
+                // ε-moves). tau=0 = greedy (unchanged behavior).
+                let mut chosen = best;
+                if tau > 0.0 {
+                    let sign = if board.side_to_move() == Color::White { 1.0 } else { -1.0 };
+                    let vals: Vec<f64> = moves
+                        .iter()
+                        .map(|&m| {
+                            let mut c = board.clone();
+                            c.play_unchecked(m);
+                            sign * agent.score(&c).tanh()
+                        })
+                        .collect();
+                    let mx = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                    let ws: Vec<f64> = vals.iter().map(|v| ((v - mx) / tau).exp()).collect();
+                    let tot: f64 = ws.iter().sum();
+                    let mut r = rng.unit() * tot;
+                    for (i, wgt) in ws.iter().enumerate() {
+                        r -= wgt;
+                        if r <= 0.0 {
+                            chosen = moves[i];
+                            break;
+                        }
+                    }
+                }
                 let predicted = pending_pred.is_some() && reply_actual == pending_pred;
-                let white_val = if board.side_to_move() == Color::White { sc } else { -sc };
-                recs.push((format!("{leaf}"), white_val.clamp(-1.0, 1.0), predicted));
-                // predicted reply for the NEXT record: child's best at depth-1
-                let mut child = board.clone();
-                child.play_unchecked(best);
-                pending_pred = if depth >= 2 {
-                    let (_, pm, _) = ctx.negamax(&child, depth - 1, 0, f64::NEG_INFINITY, f64::INFINITY);
-                    pm
+                if chosen == best {
+                    let white_val = if board.side_to_move() == Color::White { sc } else { -sc };
+                    recs.push((format!("{leaf}"), white_val.clamp(-1.0, 1.0), predicted));
+                    // predicted reply for the NEXT record: child's best at depth-1
+                    let mut child = board.clone();
+                    child.play_unchecked(best);
+                    pending_pred = if depth >= 2 {
+                        let (_, pm, _) = ctx.negamax(&child, depth - 1, 0, f64::NEG_INFINITY, f64::INFINITY);
+                        pm
+                    } else {
+                        None
+                    };
                 } else {
-                    None
-                };
+                    // sampled off-best move: record ITS afterstate + 1-ply value (the python
+                    // softmax path's contract for unexpanded roots) — on-policy data, no
+                    // prediction to carry forward.
+                    let mut child = board.clone();
+                    child.play_unchecked(chosen);
+                    let v_white = agent.score(&child).tanh();
+                    recs.push((format!("{child}"), v_white.clamp(-1.0, 1.0), predicted));
+                    pending_pred = None;
+                }
                 reply_actual = None;
-                mv = best;
+                mv = chosen;
             }
         } else {
             if opp_depth == 0 {
@@ -672,6 +713,7 @@ fn play_one(
 /// opp_depth 0 ignores opp_weights (uniform random). Returns [(z, agent_white,
 /// [(leaf_fen, white_value, predicted)])]. seed varies per game; colors alternate.
 #[pyfunction]
+#[pyo3(signature = (weights, bias, opp_weights, opp_bias, opp_depth, n_games, threads, depth, eps, ply_cap, seed, tau=0.0))]
 #[allow(clippy::too_many_arguments)]
 fn play_games(
     py: Python<'_>,
@@ -686,6 +728,7 @@ fn play_games(
     eps: f64,
     ply_cap: u32,
     seed: u64,
+    tau: f64,
 ) -> PyResult<Vec<(f64, bool, Vec<(String, f64, bool)>)>> {
     if weights.len() != NFEAT || opp_weights.len() != NFEAT {
         return Err(pyo3::exceptions::PyValueError::new_err("weights must be 809-dim"));
@@ -709,7 +752,7 @@ fn play_games(
                     while g < n_games {
                         out.push((
                             g,
-                            play_one(agent, opp, opp_depth, depth, eps, ply_cap,
+                            play_one(agent, opp, opp_depth, depth, eps, tau, ply_cap,
                                      seed.wrapping_add(g as u64).wrapping_mul(0x9E3779B97F4A7C15),
                                      g % 2 == 0),
                         ));
@@ -729,11 +772,11 @@ fn play_games(
 
 #[pyfunction]
 fn version() -> &'static str {
-    "v3.5-lmr-aspiration"
+    "v3.6-softmax-tau"
 }
 
 #[pymodule]
-fn rsearch(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn rsearch4(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Searcher>()?;
     m.add_function(wrap_pyfunction!(play_games, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;

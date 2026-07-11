@@ -1,10 +1,10 @@
 [package]
-name = "rsearch"
+name = "rsearch4"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "rsearch"
+name = "rsearch4"
 crate-type = ["cdylib"]
 
 [dependencies]

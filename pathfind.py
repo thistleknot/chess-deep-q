@@ -1,0 +1,178 @@
+"""Merge 11 :Population: — pathfinding over weight space (spec/pathfind-population.spec.md).
+
+RRT*/PBT hybrid on top of the UNCHANGED canon trivium recipe: N lanes train in parallel from
+the optimistic zero seed; every generation the population is ranked by confirmed-crown
+strength, the bottom lanes are pruned and re-seeded from the top lane's weights with fresh
+exploration jitter (:Slope-guard: protects the best-improving lane from greedy pruning —
+the FIRE-PBT caveat). Every node/prune/fork is logged to data/pathfind_tree.md; lanes feed
+the console ladder via qlearn's :Crown-rung:.
+
+Preconditions: models/qlearn_zero_seed.pt (build_zero_seed.py), models/zca.npz, rsearch3,
+Stockfish available (confirmed crowns). One population at a time; don't run alongside a
+console training run (thread + SF contention).
+
+Usage: python pathfind.py [gens=6] [epoch_games=1000] [epochs_per_gen=2] [lanes=4]
+Smoke:  python pathfind.py 1 200 1 2
+"""
+import json
+import math
+import os
+import subprocess
+import sys
+import time
+
+import numpy as np
+import torch
+
+GENS = int(sys.argv[1]) if len(sys.argv) > 1 else 6
+EPOCH_GAMES = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
+EPOCHS_PER_GEN = int(sys.argv[3]) if len(sys.argv) > 3 else 2
+NLANES = int(sys.argv[4]) if len(sys.argv) > 4 else 4
+
+SEED_FILE = "models/qlearn_zero_seed.pt"
+TREE = "data/pathfind_tree.md"
+LANE_IDS = "abcdef"[:NLANES]
+THREADS = max(1, 12 // NLANES)
+
+# canonical proven config (spec/trivium.spec.md) — lane 'a' runs exactly this, others jitter.
+# Exploration = :Softmax-tau: (optimism-directed; pairs with the optimistic zero seed); ε=0.
+CANON = {"alpha": 3e-4, "tau_start": 0.7, "tau_floor": 0.05, "c_start": 0.374, "c_end": 0.143,
+         "b_srch": 0.341, "warmup": 0.481}
+
+
+def jitter(gen, lane, reheat=1.0):
+    """Fresh exploration knobs for a jittered lane (deterministic per (gen, lane)).
+    reheat > 1 scales the τ anneal UP (operator's stall rule: local optimum -> raise
+    exploration temperature; cools back to 1 on population progress)."""
+    r = np.random.default_rng(1000 * gen + ord(lane))
+    c_start = float(np.clip(CANON["c_start"] + r.uniform(-0.1, 0.1), 0.05, 0.6))
+    return {"alpha": CANON["alpha"] * 2 ** r.uniform(-1, 1),
+            "tau_start": float(min(CANON["tau_start"] * 2 ** r.uniform(-1, 1) * reheat, 3.0)),
+            "tau_floor": float(min(CANON["tau_floor"] * 2 ** r.uniform(-1, 1) * reheat, 0.5)),
+            "c_start": c_start, "c_end": CANON["c_end"], "b_srch": CANON["b_srch"],
+            "warmup": float(np.clip(CANON["warmup"] + r.uniform(-0.15, 0.15), 0.1, 0.8))}
+
+
+def triv(cfg):
+    a_s = 1.0 - cfg["b_srch"] - cfg["c_start"]
+    a_e = 1.0 - cfg["b_srch"] - cfg["c_end"]
+    return (f"{a_s:.3f},{cfg['b_srch']:.3f},{cfg['c_start']:.3f}",
+            f"{a_e:.3f},{cfg['b_srch']:.3f},{cfg['c_end']:.3f}")
+
+
+def lane_env(lane, cfg):
+    t_start, t_end = triv(cfg)
+    return dict(os.environ,
+                QLEARN_ALPHA=f"{cfg['alpha']:.6f}", QLEARN_GAMMA="1.0", QLEARN_LAMBDA="0.7",
+                QLEARN_WARMUP="0.5", QLEARN_PATIENCE="99",     # population prunes, not patience
+                QLEARN_ELO_GAMES="0", QLEARN_EPOCH_ELO_GAMES="24", QLEARN_LOG_EVERY="500",
+                QLEARN_BATCH_GAMES="200", QLEARN_FREEZE_EPOCH="1", QLEARN_RESUME="1",
+                QLEARN_ANCHOR="1", QLEARN_TDLEAF="1", QLEARN_OPP="self", QLEARN_ENC="kc",
+                QLEARN_CONFIRM="1", QLEARN_RAMP="1", QLEARN_KC_FAITHFUL="1",
+                QLEARN_RSEARCH_DEPTH="2", QLEARN_RSEARCH_MOD="rsearch4",
+                QLEARN_ZCA="models/zca.npz",
+                QLEARN_TRIVIUM=t_start, QLEARN_TRIVIUM_END=t_end,
+                QLEARN_TRIVIUM_WARMUP=f"{cfg['warmup']:.4f}",
+                QLEARN_PARGEN="1", QLEARN_PARGEN_EPS="0.0",
+                QLEARN_PARGEN_SOFTMAX="1",
+                QLEARN_TAU_START=f"{cfg['tau_start']:.4f}",
+                QLEARN_TAU_FLOOR=f"{cfg['tau_floor']:.4f}",
+                QLEARN_PARGEN_THREADS=str(THREADS), QLEARN_PROXY_GAMES="4",
+                QLEARN_DEV="cpu", QLEARN_TAG=f"zero{lane.upper()}",
+                QLEARN_CKPT=f"models/qlearn_zero_{lane}.pt",
+                QLEARN_METRICS=f"data/qlearn_zero_{lane}.jsonl")
+
+
+def bar(lane):
+    """Confirmed-crown strength of a lane's best checkpoint (None before first crown)."""
+    try:
+        return torch.load(f"models/qlearn_zero_{lane}_best.pt", map_location="cpu").get("strength")
+    except (FileNotFoundError, RuntimeError):
+        return None
+
+
+def fork(dst, src):
+    """Re-seed lane dst from lane src's best weights: new lineage — bar + optimizer stripped."""
+    ck = torch.load(f"models/qlearn_zero_{src}_best.pt", map_location="cpu")
+    ck.pop("strength", None)
+    ck.pop("opt_state", None)
+    torch.save(ck, f"models/qlearn_zero_{dst}.pt")
+    torch.save(ck, f"models/qlearn_zero_{dst}_best.pt")
+
+
+def log_tree(line):
+    with open(TREE, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    print(line, flush=True)
+
+
+def main():
+    os.makedirs("data", exist_ok=True)
+    seed = torch.load(SEED_FILE, map_location="cpu")
+    for lane in LANE_IDS:                              # every lane starts at the SAME zero node
+        torch.save(seed, f"models/qlearn_zero_{lane}.pt")
+        torch.save(seed, f"models/qlearn_zero_{lane}_best.pt")
+    log_tree(f"\n## Population run {time.strftime('%Y-%m-%d %H:%M')} — "
+             f"{NLANES} lanes x {GENS} gens x {EPOCHS_PER_GEN}x{EPOCH_GAMES} games "
+             f"(threads/lane {THREADS})")
+    log_tree("| gen | lane | config | bar | action |")
+    log_tree("|---|---|---|---|---|")
+
+    prev = {lane: None for lane in LANE_IDS}
+    configs = {lane: (dict(CANON) if lane == "a" else jitter(0, lane)) for lane in LANE_IDS}
+    reheat, prev_pop_best = 1.0, None                  # :Reheat:: stall -> raise τ, progress -> cool
+    for gen in range(1, GENS + 1):
+        procs = {}
+        for lane in LANE_IDS:
+            cfg = configs[lane]
+            log = open(f"data/pathfind_{lane}.log", "a")
+            procs[lane] = subprocess.Popen(
+                [sys.executable, "qlearn.py", str(EPOCH_GAMES), str(EPOCHS_PER_GEN)],
+                env=lane_env(lane, cfg), stdout=log, stderr=subprocess.STDOUT)
+        for lane, p in procs.items():
+            rc = p.wait()
+            if rc != 0:
+                log_tree(f"| {gen} | {lane} | — | — | LANE FAILED rc={rc} (see data/pathfind_{lane}.log) |")
+
+        bars = {lane: bar(lane) for lane in LANE_IDS}
+        slopes = {lane: (bars[lane] - prev[lane]) if (bars[lane] is not None and prev[lane] is not None)
+                  else None for lane in LANE_IDS}
+        ranked = sorted(LANE_IDS, key=lambda l: (bars[l] is not None, bars[l] or -1e9), reverse=True)
+        best_slope = max((l for l in LANE_IDS if slopes[l] is not None),
+                         key=lambda l: slopes[l], default=None)
+        top = ranked[0]
+        prune = [l for l in ranked[-(NLANES // 2):] if l != best_slope and l != top]
+
+        pop_best = bars[ranked[0]]
+        if pop_best is not None:
+            if prev_pop_best is not None and pop_best <= prev_pop_best + 1e-3:
+                reheat = min(reheat * 1.5, 4.0)        # stall: turn the temperature up
+                log_tree(f"| {gen} | — | REHEAT x{reheat:.2f} (pop best flat at {pop_best:.2f}) | — | — |")
+            else:
+                reheat = 1.0                           # progress: cool back to canon scale
+            prev_pop_best = pop_best
+
+        for lane in LANE_IDS:
+            cfg = configs[lane]
+            desc = (f"a{cfg['alpha']:.4f} t{cfg['tau_start']:.2f}/{cfg['tau_floor']:.2f} "
+                    f"c{cfg['c_start']:.2f} w{cfg['warmup']:.2f}")
+            action = ("TOP" if lane == top else
+                      "slope-guard" if lane == best_slope and lane in ranked[-(NLANES // 2):] else
+                      f"PRUNED -> fork({top})" if lane in prune else "keep")
+            b = "—" if bars[lane] is None else f"{bars[lane]:.2f}"
+            log_tree(f"| {gen} | {lane} | {desc} | {b} | {action} |")
+
+        if gen < GENS:
+            for lane in prune:
+                fork(lane, top)
+                configs[lane] = jitter(gen, lane, reheat)
+            prev = dict(bars)
+
+    log_tree(f"| — | — | final ranking: {' > '.join(ranked)} | {bars[ranked[0]]} | "
+             f"winner models/qlearn_zero_{ranked[0]}_best.pt |")
+    print(f"\nWINNER lane {ranked[0]}: models/qlearn_zero_{ranked[0]}_best.pt "
+          f"(bar {bars[ranked[0]]}) — next: purist + d7 rungs")
+
+
+if __name__ == "__main__":
+    main()

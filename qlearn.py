@@ -102,6 +102,11 @@ PARGEN     = int(os.environ.get("QLEARN_PARGEN", "0"))         # Merge 9 (spec/p
 PARGEN_OPP_D = int(os.environ.get("QLEARN_PARGEN_OPP_D", "1"))
 PARGEN_EPS = float(os.environ.get("QLEARN_PARGEN_EPS", "0.1")) # ε: state-coverage exploration
 PARGEN_THREADS = int(os.environ.get("QLEARN_PARGEN_THREADS", "12"))
+PARGEN_SOFTMAX = int(os.environ.get("QLEARN_PARGEN_SOFTMAX", "0"))  # Merge 11 :Softmax-tau::
+# 1 = native generation samples moves ∝ exp(σ·v1/τ) with the trainer's OWN annealed τ —
+# optimism-directed exploration (inflated init values attract visits until deflated); pairs
+# with the optimistic zero seed. Set eps=0 when on (τ subsumes uniform exploration).
+# Requires rsearch module ≥ v3.6 (play_games tau kwarg).
 RSEARCH_D  = int(os.environ.get("QLEARN_RSEARCH_DEPTH", "0"))  # Merge 8 (spec/rust-search.spec.md):
 # >0 -> generation/measurement moves, TDLeaf leaf targets, and predicted replies come from the
 # native FULL-WIDTH alpha-beta + quiescence at this depth (KnightCap-grade targets). Greedy
@@ -598,7 +603,8 @@ def main():
             gw, gb = gen.weights_flat()
             batch = _pg(gw, gb, gw, gb, PARGEN_OPP_D, chunk, PARGEN_THREADS,
                         max(RSEARCH_D, 2), PARGEN_EPS, PLY_CAP,
-                        (SEED + 1) * 1_000_003 + cum_games + games_played)
+                        (SEED + 1) * 1_000_003 + cum_games + games_played,
+                        tau if PARGEN_SOFTMAX else 0.0)   # :Softmax-tau:: trainer's annealed τ
             for z, aw, recs in batch:
                 game_data.append(([ENC_FN(chess.Board(f)) for f, _v, _p in recs],
                                   [v for _f, v, _p in recs], z,
@@ -808,9 +814,11 @@ def main():
         print(f"final measure on BEST-visited (strength {ckb.get('strength')})", flush=True)
 
     # --- Elo objective (the ONLY strength signal Optuna maximizes) ---
+    # ELO_GAMES=0 (population lanes, Merge 11): skip the final measure entirely — the lane's
+    # signal is its confirmed-crown bar in _best.pt; rungs are measured on the WINNER only.
     res = measure(agent.greedy_move,
                   (f"{TAG} " if TAG else "") + f"qlearn a{ALPHA} g{GAMMA} lam{LAMBDA} wu{WARMUP} (Merge 2)",
-                  ELO_GAMES, merge=2)
+                  ELO_GAMES, merge=2) if ELO_GAMES > 0 else {}
     os.makedirs("models", exist_ok=True)
     torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                 "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
@@ -834,7 +842,7 @@ def main():
     # trials identical at the floor -> TPE learned nothing).
     final_pts = (res.get("vs_sf_score") or 0.0) * ELO_GAMES
     pool_pts, pool_n = run_sf_pts + final_pts, run_sf_n + ELO_GAMES
-    objective = (1320 + elo_diff(pool_pts / pool_n, pool_n)) + 10.0 * (res.get("vs_random_score") or 0.0)
+    objective = (1320 + elo_diff(pool_pts / max(pool_n, 1), max(pool_n, 1))) + 10.0 * (res.get("vs_random_score") or 0.0)
     print(f"pooled objective: sf {pool_pts:g}/{pool_n} -> {objective:.1f} (final-only elo {elo})")
     print(f"KILL-CHECK elo {objective:.1f}")
 
