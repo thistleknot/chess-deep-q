@@ -6,6 +6,33 @@
 python main.py
 ```
 
+## 🧪 From-Scratch RL Ladder (Merge 2 — Q-learning, current work)
+
+The from-scratch rung lives in `qlearn.py` (specs in `spec/`). Two ways to drive it:
+
+### Training console (browser UI)
+```bash
+python app.py          # boots FastAPI + opens http://127.0.0.1:8000/
+```
+Settings form (preloaded via "Load Optuna best"), start/stop, and live plots: nominal score & actual
+Elo vs SF@1320, loss, trace σ, material margin, turns, strength, learned piece worth, avg reward,
+checkmate rate. Training runs detached — it survives browser refreshes and server restarts.
+
+### Optuna study (hyperparameter tuning)
+```bash
+python tune_qlearn.py [n_trials] [sample_games] [max_epochs] [elo_games] [batch_games]
+python tune_qlearn.py 5 200 3 20 20      # the standard protocol
+```
+Tunes the ALGORITHMIC knobs only — {γ decay, α step, λ trace, warmup ratio} via TPE seeded at
+literature priors. **Sample size and batch size are infrastructure controls: passed fixed, never
+searched** (batch ≤ sample is asserted). Studies persist in `models/qlearn_optuna.db` under a name
+FINGERPRINTED by (search space, training regime, protocol): rerunning with the same settings RESUMES
+the study — TPE keeps learning from all prior trials — while any change starts a fresh study alongside
+(old ones are kept; never delete the DB). One trainer at a time: don't run a study and a console run
+together (they share `data/qlearn_metrics.jsonl`).
+Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdict report with
+`python report_qlearn.py`.
+
 ### First Time Setup
 1. The AI will automatically create `models/` and `training_plots/` directories
 2. Pre-trained models should be placed in the `models/` directory

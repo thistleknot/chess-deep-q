@@ -2,3 +2,7 @@
 {"records": 156000, "elo_diff": -585, "elo": 782, "score": 0.03, "depth": 2, "label": "156k enriched, balanced", "cycle": 0}
 {"records": 469033, "elo_diff": -223, "elo": 1144, "score": 0.22, "depth": 2, "label": "469k enriched + coverage", "cycle": 0}
 {"records": 469033, "elo_diff": -191, "elo": 1481, "score": 0.25, "depth": 3, "label": "469k @d3 (depth lever)", "cycle": 0}
+{"records": 703758, "elo_diff": -83, "elo": 1284, "score": 0.38, "label": "climb 1 (+coverage)", "cycle": 1}
+{"records": 896842, "elo_diff": -241, "elo": 1126, "score": 0.2, "label": "climb 2 (+coverage)", "cycle": 2}
+{"records": 1192887, "elo_diff": 0, "elo": 1367, "score": 0.5, "label": "climb 3 (+coverage)", "cycle": 3}
+{"records": 1430845, "elo_diff": -58, "elo": 1309, "score": 0.42, "label": "climb 4 (+coverage)", "cycle": 4}

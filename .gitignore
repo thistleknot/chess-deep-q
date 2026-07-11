@@ -265,3 +265,5 @@ data/distill_dag.jsonl
 dagger_train.log
 models/nnue_dagger.pt
 dagger_pipe.log
+
+mlruns/

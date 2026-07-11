@@ -1,62 +1,62 @@
-# chess-deep-q spec
+# chess-deep-q spec — RL from first principles
 
-Source-of-truth specs for the RL alignment described in `../prompt.md` ("apply RL to a
-system such as chess when you already have a known evaluator/prior"). Authored with the
-`spec` skill (rendered layer). **Spec-driven development: the spec is authoritative; code traces
-to it, not the reverse.**
+A clean restart. The goal is **to understand RL by building it up one reviewable merge at a time**, not to
+ship a strength number. Strength is only the yardstick; the point is that every feature is spec'd, small,
+and traceable — a proper merge request, not an AI-generated pile.
 
-**Single entry point: [`chess-rl.spec.md`](chess-rl.spec.md)** — the root rendered spec. Its
-`import:` list (training-loop, rl-categorization, dynamic-difficulty, elo-calibration,
-terminal-interface) transitively closes over all 13 specs below, so following imports from that
-one file reaches the entire set. This index gives the human reading order; `chess-rl.spec.md` is
-the machine-followable root.
+**Root spec: [`environment.spec.md`](environment.spec.md)** — Merge 0, the chess MDP scaffold (board +
+random legal moves + terminal reward, no learning). Every learning rung imports it and adds exactly one
+algorithm.
 
-Import order flows bottom-up:
+## Run it
 
-1. **elo-measurement** — the real Stockfish anchor, measured Elo, and the gates that own all
-   progress. No imports; everything gates on it.
-2. **annealing-schedule** — the shared coefficient service (prior → learned handoff), driven by
-   Elo-gated progress. Imports 1.
-3. **prior-evaluator** — the fixed heuristic prior and the :Prior-lineage: it starts
-   (heuristic → distilled teacher → learned net). Imports 1–2.
-4. **learned-model** — the dual-head residual tower (value + policy), value-target convention,
-   batch-evaluate API, reward frame and sign. Imports 2–3.
-5. **teacher-distillation** — Stage 1: Stockfish distillation under the 5-minute cumulative
-   run contract (process-separated labelling, dedup'd dataset, Elo trend). Imports 1–4.
-6. **search-mcts** — PUCT search with batched leaf evaluation, the exposed search value, and two
-   regression-pinned conventions (negamax backup sign; argmax-Q root selection at small budgets).
-   Imports 2–5.
-7. **value-target** — the value-head learning rule: a search-bootstrapped λ-return (tree-backup,
-   off-policy-safe) shared by the refinement and self-play stages; TD(0) and Monte-Carlo are its
-   endpoints. Imports 2, 4, 6.
-8. **self-play-leela** — Stage 3: expert iteration (visit-count policy distillation, λ-return
-   value target, Dirichlet carve-out, surpass-teacher gate, optional σ-matched early opponent).
-   Imports 1–2, 4–7.
-9. **training-loop** — the staged loop: gate-driven stage controller, reward assignment,
-   failure-mode monitoring. Imports 1–8.
-10. **dynamic-difficulty** — adapt the opponent's move-selection temperature to the human
-    player's skill band (regret-tracked, *relative*). Imports learned-model + search-mcts.
-11. **elo-calibration** — the temperature→*absolute*-Elo dial: calibrate one net to any target
-    strength on the human curve. Imports elo-measurement + dynamic-difficulty.
-12. **rl-categorization** — qualified three-stage classification (supervised distillation →
-    off-policy λ-return refinement → expert iteration; never SARSA/PPO/literal-DQN).
-13. **terminal-interface** — the terminal human-vs-computer front-end: move entry, in-game
-    commands (full word + first-letter shortcut), and the per-turn board readout that surfaces
-    the estimated Elo. Imports dynamic-difficulty + elo-calibration.
+No setup — `python-chess` is the only dependency. From the repo root:
 
-The load-bearing idea across the set: a **prior lineage** — the hand heuristic bootstraps the
-distilled Stockfish teacher, the teacher bootstraps the self-play learner, and the learner
-eventually surpasses the teacher — where every handoff is **annealed toward the learned model**
-(never toward randomness; root Dirichlet noise in self-play games is the one bounded, constant
-carve-out) and **gated by measured Elo against a real Stockfish anchor**, never by wall-clock or
-game count. Failure modes (teacher lock-in, reward hacking, policy collapse, stagnation at a
-gate) are monitored, not assumed away. Two search bugs found by measurement are pinned as
-regression specs in search-mcts: the negamax backup sign convention and argmax-Q root selection
-at small simulation budgets.
+```bash
+python chess_rl.py            # Merge 0: 2000 uniform-random games, prints the W/L/D baseline
+python chess_rl.py 500 200    # args: [episodes] [ply_cap]
 
-The value head learns a **search-bootstrapped λ-return** (value-target), not literal TD(0) and not
-pure Monte-Carlo — the bootstrap share β anneals down from lean-on-the-distilled-value (low
-variance early) toward the ground-truth game outcome (AlphaZero MC) as strength is proven. The
-policy learns by MCTS visit distillation (expert iteration), never policy gradient. An optional
-σ-matched "just-above" opponent (self-play-leela) can sharpen early training but is annealed out in
-favor of full-strength symmetric self-play, since a weakened opponent yields lower-quality targets.
+python measure_elo.py 20      # anchor the current agent to Stockfish@1320 -> Elo, append data/rl_trend.jsonl
+python dashboard.py           # render dashboard.html (Elo, W/D/L, chart) and open it in the browser
+```
+
+Observability (`measure_elo.py` + `dashboard.py`, spec: `observability.spec.md`) is cross-cutting — pulled
+forward so every rung is watchable. At Merge 0 the agent is random, so it reads ~-280 Elo (floored, score ≈0
+vs SF@1320): the honest bottom the ladder climbs from.
+
+Merge 0 has no agent to run — it plays random moves and reports the floor every learning rung must beat
+(~W 5% / L 6% / D 89%). The learning rungs (`chess_rl.py` will grow an agent at Merge 1) come next.
+
+> The repo-root `README.md` documents the **archived** system (the old distillation/menu engine), not this
+> restart. This file is the entry point for the from-scratch RL work.
+
+## The merge ladder
+
+Each rung is its own spec + its own PR-sized change on top of the previous one. We do not skip rungs and we
+do not fold two algorithms into one merge.
+
+| Merge | Spec | What it adds | Learns? |
+|-------|------|--------------|---------|
+| **0** | `environment.spec.md` | `ChessEnv`: reset/step, random legal-move policy, white-absolute terminal reward, ply cap | no — the scaffold |
+| **1** | `self-improvement-loop.spec.md` | Cross-Entropy Method / policy iteration: keep only decisive (checkmate-under-cap) games in a buffer → clean ±1 labels → fit value on raw board state → act greedily → regenerate. Watch checkmate-rate rise. | yes (CEM, no bootstrap) |
+| **2** | `q-learning.spec.md` | afterstate TD(λ) Q-learning: keep all games, credit each move by `r+γV(next)` (λ=0 ⇒ one-step Q-learning), uniform replay buffer, live dashboard + SF-anchored Elo. Fixes Merge 1's draw-collapse. | yes (bootstrap) |
+| 3+ | _(later)_ | n-step / TD(λ), then policy-gradient (REINFORCE → PPO/GRPO), per `reference/all-rl-algorithms` | — |
+
+## Why not tabular Q-learning directly
+
+Chess states essentially never repeat, so a tabular Q-table never revisits a key and never learns — it stays
+at its initial value forever. So the least-common-denominator that actually learns here is **function-
+approximation** TD/MC (a value function over features), not a lookup table. This constraint is pinned in
+`environment.spec.md` functional specs and shapes every rung.
+
+## Reference
+
+`reference/all-rl-algorithms/` (cloned) — the algorithm-by-algorithm notebooks we climb: `01_simple_rl` →
+`02_q_learning` → `03_sarsa` → `06_reinforce` → … plus `cheatsheet.md`. Paired with *Deep Reinforcement
+Learning in Action* (ch. 2 bandits/optimistic-init, ch. 3 DQN).
+
+## Archive
+
+The former all-in-one system (17 specs: distillation, PUCT/MCTS, NNUE, self-play, Elo calibration) is
+preserved under [`archive/`](archive/) with git history intact. It is **not imported** and does not govern
+new work — it's reference for what was tried, not a spec to extend.

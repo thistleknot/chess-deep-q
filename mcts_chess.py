@@ -19,7 +19,7 @@ Beam leaf evaluation MUST blend eps*Phi + (1-eps)*V_net, so the heuristic
     guided by the learned value head as training progresses.
 While epsilon > 0: policy gradients are biased (no importance correction) —
     the exact mixture probability of a beam-chosen move marginalizes over
-    seven stochastic pruning rounds and is intractable. This is the
+    the stochastic pruning rounds and is intractable. This is the
     Q-learning stance: learn from search-chosen actions unweighted; the
     bias SHALL vanish as epsilon anneals to 0.
 The critic target MUST be the n-step negamax return
@@ -31,6 +31,12 @@ Reward shaping MUST be potential-based, F = gamma*(-Phi(s')) - Phi(s) with
     Phi = tanh-squashed material+PST score, so the optimal policy is invariant
     to the shaping and the heuristic cannot corrupt the final policy.
 If a game exceeds max_plies or is drawn: terminal reward MUST be 0.
+The beam's played move MUST be the argmax over root backed-up values
+    (:Root-commit:); exploration lives upstream in fetch and survival
+    sampling. select() MUST stamp last_value (acted-on estimate, the prior
+    in the cross-move :Delta:) and last_margin (:Move-margin:, max - mean
+    of the final top_k) on every exit path, including forced-move and
+    proven-mate short-circuits.
 Checkpoints SHOULD load-if-exists; metrics SHALL persist to sqlite.
 Elo estimation MUST anchor to an opponent of known rating: Stockfish under
     UCI_LimitStrength (UCI_Elo floor 1320, calibrated at long TC / CCRL
@@ -71,11 +77,14 @@ class Line [value]: one surviving lookahead trajectory in the beam —
 
 class FibonacciBeamSampler [service]: annealed sampled lookahead
     state: tau, pair_k, mmr_lambda — selection knobs, set at construction
-    select(root, net, eps) -> Move: run the beam, return the last survivor's
-        root move; a root-level proven mate short-circuits immediately (max
-        backup with certainty); fails fast (assert) on terminal root boards
+    state: last_value — root-perspective value acted on, stamped by select
+    state: last_margin — max - mean(final top_k), stamped by select
+    select(root, net, eps) -> Move: run the beam, play the argmax over
+        root backed-up values; proven root mate short-circuits (max backup
+        with certainty); fails fast (assert) on terminal root boards
         (Require: root has legal moves;
-         Guarantee: returned move is legal at root)
+         Guarantee: returned move is legal at root AND is the argmax over
+         the final survivor set AND last_value/last_margin are stamped)
 
 class BehaviorPolicy [service]: the epsilon mixture over (beam, actor)
     state: epsilon — float, mutated per-episode by anneal()
@@ -155,15 +164,17 @@ Loop over width w in widths[1:]:                    # depth-1 rounds
             (Maintain: mate lines freeze at +-1 and are never extended)
     lines <- temperature-sample w survivors without replacement,
              score = value/tau - mmr_lambda * picked-root-move count
-When phi_start > 1: a final temperature pick reduces the last level's
-    F(phi_start) survivors to one line
-Assert: after the final pick exactly one line survives; its root move is
-        legal at root
+finalists <- the last survivor set with more than one line
+played <- argmax over finalists by backed-up value    # :Root-commit:
+last_value <- played line's value; last_margin <- max - mean(finalists)
+Assert: the played root move is legal at root and maximal over finalists
 
 Given a root with one legal move, When select runs, Then that move MUST be
-    returned without running any beam round.
-Given tau -> 0, When survivors are sampled, Then selection MUST approach
-    greedy top-w by backed-up value (the epsilon-greedy limit).
+    returned with last_value stamped from the child's evaluation.
+Given a mating root move exists among the fetched candidates, When select
+    runs, Then it MUST be played with last_value = 1.0 stamped.
+Given tau -> 0, When survivors are sampled, Then survival MUST approach
+    greedy top-w by backed-up value; the terminal commit is argmax always.
 
 --- Behavioral (Trainer.train) ---
 
@@ -570,12 +581,11 @@ class FibonacciBeamSampler:
         self.pair_k = pair_k
         self.mmr_lambda = mmr_lambda
         self.widths = fib_schedule(phi_depth, phi_width, phi_start)
-        # Exposed after each select() (see spec/search-mcts.spec.md):
-        #   last_margin = :Move-margin: = max - mean(top_k) over the final survivors (decisiveness,
-        #                 >= 0; large = one dominant move -> safe to cut / temperature-sample).
-        #   last_value  = the root-perspective backed-up value we ACT on; a caller can compare it to
-        #                 next move's value to form the signed :Delta: (realized advantage / TD error;
-        #                 full cross-move reuse is the :Search-window-reuse: v2, not done here).
+        # Stamped by every select() (spec/search-mcts.spec.md):
+        #   last_value  — root-perspective backed-up value acted on; the
+        #                 prior estimate in the cross-move signed :Delta:
+        #   last_margin — :Move-margin: max - mean(final top_k), >= 0;
+        #                 decisiveness of the winner over the field
         self.last_margin = 0.0
         self.last_value = 0.0
 
@@ -679,18 +689,29 @@ class FibonacciBeamSampler:
     # -- entry ---------------------------------------------------------------
     def select(self, root: chess.Board, net, eps: float) -> chess.Move:
         """Run the beam. Require: root has legal moves.
-        Guarantee: returned move is legal at root.
+        Guarantee: returned move is legal at root; the played move is the
+        argmax over root backed-up values (:Root-commit:); last_value and
+        last_margin are stamped on EVERY exit path, so a cross-move :Delta:
+        consumer never reads a stale estimate.
 
-        :Root-commit: (spec/search-mcts.spec.md) — the final pick is ALWAYS argmax over root backed-up
-        values; exploration lives UPSTREAM (uniform fetch, temperature/MMR survival, and the
-        ε-mixture's direct-π branch), so max at the root does not starve on-policy data. Stores
-        :Move-margin: (last_margin) and the acted-on value (last_value, for cross-move :Delta:)."""
+        Exploration lives upstream (uniform fetch, temperature/MMR
+        survival, the eps-mixture's direct-pi branch); the commit is
+        deterministic so next volley's re-search audits the exploited
+        choice, not a lottery. Failure mode: sampled backups are optimistic
+        when a refutation went unsampled — the signed :Delta: next volley
+        is the correction channel."""
         legal = list(root.legal_moves)
         assert legal, "beam called on terminal board"
-        if len(legal) == 1:
-            self.last_margin, self.last_value = 0.0, 0.0
-            return legal[0]
         root_turn = root.turn
+        if len(legal) == 1:
+            # Forced move: stamp the child's actual value, not a
+            # fabricated 0.0 — a phantom estimate poisons :Delta:.
+            b = root.copy(stack=False)
+            b.push(legal[0])
+            v = self._blend_values([b], net, eps)[0]
+            self.last_value = self._to_root(v, b, root_turn)
+            self.last_margin = 0.0
+            return legal[0]
         fetch = random.sample(legal, min(self.widths[0], len(legal)))
         boards = []
         for mv in fetch:
@@ -698,28 +719,36 @@ class FibonacciBeamSampler:
             b.push(mv)
             boards.append(b)
         vals = self._blend_values(boards, net, eps)
-        lines = []
+        lines, mate_mv, rvs = [], None, []
         for mv, b, v in zip(fetch, boards, vals):
-            if b.is_checkmate():
-                return mv          # proven win: max backup with certainty
-            lines.append(Line(b, mv, self._to_root(v, b, root_turn),
-                              b.is_game_over()))
+            rv = self._to_root(v, b, root_turn)   # checkmate child -> +1
+            rvs.append(rv)
+            if b.is_checkmate() and mate_mv is None:
+                mate_mv = mv
+            lines.append(Line(b, mv, rv, b.is_game_over()))
+        if mate_mv is not None:
+            # Proven win: max backup with certainty — stamped, not stale.
+            self.last_value = 1.0
+            self.last_margin = 1.0 - sum(rvs) / len(rvs)
+            return mate_mv
         finalists = lines
         for i, width in enumerate(self.widths[1:]):
+            last = (i == len(self.widths) - 2)
+            if last and width == 1:
+                # :Root-commit: argmax supersedes the final collapse —
+                # sampling one line only to discard it is dead work.
+                break
             lines = self._prune(lines, width)
             if len(lines) > 1:
-                finalists = lines          # remember the last top_k (>1) survivor set
-            last = (i == len(self.widths) - 2)
-            if not last and width > 1:     # no growth after the final level
+                finalists = lines          # last top_k (>1) survivor set
+            if not last:
                 self._fan_out(lines, net, eps, root_turn)
-        # :Move-margin: over the last top_k set (NOT the post-collapse singleton): decisiveness of
-        # the winner over the surviving field (root-perspective backed-up values). >= 0; != Delta.
+        # :Move-margin: over the final top_k (root-perspective backed-up
+        # values, all extended to equal depth). >= 0; distinct from :Delta:.
         best = max(finalists, key=lambda l: l.value)
-        self.last_margin = best.value - sum(l.value for l in finalists) / len(finalists)
+        self.last_margin = best.value \
+            - sum(l.value for l in finalists) / len(finalists)
         self.last_value = best.value
-        # :Root-commit:: play argmax backed-up value (τ→0 at the terminal level). Sampled backups are
-        # optimistic when a refutation was unsampled; the next volley's signed :Delta: corrects it
-        # (:Search-window-reuse:). Upstream fetch/prune + the ε-mixture π branch supply exploration.
         assert best.root_move in root.legal_moves
         return best.root_move
 
