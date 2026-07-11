@@ -110,6 +110,10 @@ TRIVIUM    = os.environ.get("QLEARN_TRIVIUM", "")              # "a,b,c" (sum 1)
 # (S&B §12 averaged backups; KataGo mixed value targets): G = a·λ-return + b·search value at t
 # + c·final outcome z. "" = off (pure λ-return). Operator-proposed uniform trivium = "0.34,0.33,0.33".
 _TRIV = tuple(float(x) for x in TRIVIUM.split(",")) if TRIVIUM else None
+TRIVIUM_END = os.environ.get("QLEARN_TRIVIUM_END", "")         # :Trivium-anneal:: end triple —
+# weights slide start->end over training progress via the shared :anneal: shape ("" = static)
+_TRIV_END = tuple(float(x) for x in TRIVIUM_END.split(",")) if TRIVIUM_END else None
+TRIV_WARMUP = float(os.environ.get("QLEARN_TRIVIUM_WARMUP", "0.4"))
 RAMP       = os.environ.get("QLEARN_RAMP", "0") == "1"         # spec :Ramp-filter: (KnightCap td.c,
 # RAMP_FACTOR=0): favorable temporal differences on UNPREDICTED opponent moves are zeroed —
 # opponent blunders teach nothing; unfavorable surprises always teach. Terminal difference is
@@ -374,7 +378,7 @@ def play_game(agent, tau, rng, env, opp_move=None, agent_white=True):
     return xs, gvs, z, predicted, signs
 
 
-def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
+def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None):
     """λ-return targets for each visited afterstate. Reward is 0 until the terminal (White-absolute z);
     the bootstrap for step k is the GREEDY value at position k+1 (off-policy max), 0 at the terminal step.
     `lam` is the (possibly variance-adapted) eligibility-trace λ for this epoch.
@@ -386,6 +390,8 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
     T = len(xs)
     if T == 0:
         return [], []
+    if triv is None:
+        triv = _TRIV
     if not (RAMP and TDLEAF) or predicted is None:
         rewards = [0.0] * T
         rewards[-1] = z
@@ -393,8 +399,8 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
         dones[-1] = True
         boot = [gvs[k + 1] if k + 1 < T else 0.0 for k in range(T)]
         G = lambda_return(rewards, boot, dones, lam, gamma=GAMMA)
-        if _TRIV is not None:
-            a, b, c = _TRIV
+        if triv is not None:
+            a, b, c = triv
             G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
         return xs, G
     deltas = [0.0] * T
@@ -409,8 +415,8 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None):
     for k in range(T - 1, -1, -1):                             # G_k = gv_k + Σ (γλ)^{j-k} δ_j
         acc = deltas[k] + GAMMA * lam * acc
         G[k] = gvs[k] + acc
-    if _TRIV is not None:                                      # compound target (operator trivium):
-        a, b, c = _TRIV                                        # λ-return : search value : outcome
+    if triv is not None:                                       # compound target (operator trivium):
+        a, b, c = triv                                         # λ-return : search value : outcome
         G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
     return xs, G
 
@@ -612,9 +618,14 @@ def main():
                 else:
                     xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env)
                 game_data.append((xs, gvs, z, pred_f, sgn))
+        triv_now = _TRIV
+        if _TRIV is not None and _TRIV_END is not None:        # :Trivium-anneal:
+            _f = math.exp(-((cum_games + games_played) / max(1, cum_games + total_games))
+                          / max(TRIV_WARMUP, 1e-6))
+            triv_now = tuple(e + (s - e) * _f for s, e in zip(_TRIV, _TRIV_END))
         for xs, gvs, z, pred_f, sgn in game_data:
             zs_log.append(z)
-            xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn)
+            xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now)
             for x, g in zip(xt, G):
                 new_pairs.append((x, g))
                 if not KC_FAITHFUL:

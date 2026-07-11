@@ -37,6 +37,10 @@ ARCH        = sys.argv[6] if len(sys.argv) > 6 else "linear"   # linear | mlp �
 HIDDEN      = int(sys.argv[7]) if len(sys.argv) > 7 else 64    # mlp hidden width — part of the identity
 ALGO        = sys.argv[8] if len(sys.argv) > 8 else "q"        # q | ac — selects trainer + manifold
 assert BATCH_GAMES <= EPOCH_GAMES, "batch size (games) must be <= sample size (games/epoch)"
+TRIV_TUNE = os.environ.get("QLEARN_TRIV_TUNE", "0") == "1"    # :Trivium-anneal: dims (c_start,
+# c_end, b_srch, triv_warmup); a = 1-b-c(t). Search-space change -> new fingerprint.
+ZCA_ENV  = os.environ.get("QLEARN_ZCA", "")                   # whitened training (E3 treatment);
+# with kc+TDLEAF, trials seed from models/qlearn_wseed.pt (pristine whitened) instead
 ENC      = os.environ.get("QLEARN_ENC", "pst")                # pst | kc (Merge 6 donor features) —
 # changes the INPUT manifold -> study identity; kc trials run FRESH nets (champion seed is 769-dim)
 OPP      = os.environ.get("QLEARN_OPP", "self")               # self | graded — changes the TRAINING
@@ -82,6 +86,11 @@ else:
         REGIME += "|tdleaf-leafgen|resume-champ|v2"   # v2: :Backed-bootstrap: spec repair —
         # bootstrap max over depth-backed values only (S&B 015); v1 studies measured the
         # maximization-bias-inflated variant and are kept for reference, never resumed
+    if TRIV_TUNE:
+        REGIME += "|triv-anneal|v1"
+        SPACE += "|c_start[0.1,0.6]|c_end[0,0.2]|b_srch[0.1,0.5]|triv_warmup[0.1,0.8]"
+    if ZCA_ENV:
+        REGIME += "|zca|v1"
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
 BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # (q) behavior policy — study identity
 CURRICULUM = os.environ.get("QLEARN_CURRICULUM", "0")          # exploring-starts fraction (passthrough
@@ -135,7 +144,8 @@ def run_trial(p, trial_no):
             seed = TDLEAF_SEED
             if ENC != "pst":
                 ck = ck.replace(".pt", f"_{ENC}.pt")
-                seed = TDLEAF_SEED.replace(".pt", f"_{ENC}.pt")
+                seed = ("models/qlearn_wseed.pt" if ZCA_ENV
+                        else TDLEAF_SEED.replace(".pt", f"_{ENC}.pt"))
             env["QLEARN_CKPT"] = ck
             shutil.copyfile(seed, ck)
             shutil.copyfile(seed, ck.replace(".pt", "_best.pt"))
@@ -143,6 +153,17 @@ def run_trial(p, trial_no):
                        QLEARN_SEARCH_DEPTH=SEARCH_D, QLEARN_SEARCH_WIDTH=SEARCH_W,
                        QLEARN_PROXY_GAMES=os.environ.get("QLEARN_PROXY_GAMES", "6"),
                        QLEARN_DEV=os.environ.get("QLEARN_DEV", "cpu"))
+            for k in ("QLEARN_ZCA", "QLEARN_RSEARCH_DEPTH", "QLEARN_RSEARCH_MOD",
+                      "QLEARN_KC_FAITHFUL", "QLEARN_RAMP", "QLEARN_OPP_REACH",
+                      "QLEARN_CONFIRM"):
+                if os.environ.get(k):
+                    env[k] = os.environ[k]
+            if TRIV_TUNE:
+                a_s = 1.0 - p["b_srch"] - p["c_start"]
+                a_e = 1.0 - p["b_srch"] - p["c_end"]
+                env.update(QLEARN_TRIVIUM=f"{a_s:.3f},{p['b_srch']:.3f},{p['c_start']:.3f}",
+                           QLEARN_TRIVIUM_END=f"{a_e:.3f},{p['b_srch']:.3f},{p['c_end']:.3f}",
+                           QLEARN_TRIVIUM_WARMUP=f"{p['triv_warmup']:.3f}")
     out = subprocess.run([sys.executable, script, str(EPOCH_GAMES), str(MAX_EPOCHS)],
                          env=env, capture_output=True, text=True, timeout=14400).stdout
     m = _ELO.search(out)
@@ -168,6 +189,11 @@ def objective(trial):
             "lambda_warmup": trial.suggest_float("lambda_warmup", 0.10, 1.20),
             "tau_floor": trial.suggest_float("tau_floor", 0.03, 0.25),
         }
+        if TRIV_TUNE:
+            p["c_start"] = trial.suggest_float("c_start", 0.1, 0.6)
+            p["c_end"] = trial.suggest_float("c_end", 0.0, 0.2)
+            p["b_srch"] = trial.suggest_float("b_srch", 0.1, 0.5)
+            p["triv_warmup"] = trial.suggest_float("triv_warmup", 0.1, 0.8)
     elo = run_trial(p, trial.number)
     print(f"trial {trial.number}: elo {elo:.0f}  {p}", flush=True)
     return elo

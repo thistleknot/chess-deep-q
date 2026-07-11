@@ -116,6 +116,8 @@ class TrainReq(BaseModel):
                                   # (S&B §12 averaged backups / KataGo mixed targets); "" = off
     rsearch_mod: str = "rsearch"  # (q) native module name (rsearch2 = v2/v3 side-build)
     zca: str = ""                 # (q) E3: path to models/zca.npz -> train in whitened space
+    trivium_end: str = ""         # (q) :Trivium-anneal:: end triple (weights slide start->end)
+    trivium_warmup: float = 0.4   # (q) :Trivium-anneal:: e-folding fraction
     proxy_games: int = 20         # greedy eval games per sample (search runs: lower = cheaper samples)
     device: str = ""              # "" = trainer default; "cpu" recommended for search (small batches)
     lineage: str = ""             # checkpoint lineage name -> models/<algo>_<lineage>.pt; isolates
@@ -236,6 +238,8 @@ def api_train_start(cfg: TrainReq):
                QLEARN_TRIVIUM=cfg.trivium,
                QLEARN_RSEARCH_MOD=cfg.rsearch_mod,
                QLEARN_ZCA=cfg.zca,
+               QLEARN_TRIVIUM_END=cfg.trivium_end,
+               QLEARN_TRIVIUM_WARMUP=f"{cfg.trivium_warmup:.4f}",
                QLEARN_PROXY_GAMES=str(cfg.proxy_games),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
                QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"

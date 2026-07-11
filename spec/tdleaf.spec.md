@@ -113,6 +113,18 @@ drifts on luck, honest epochs revert against phantoms, and KnightCap-scale slow 
   (Optuna objective resolution).
 - Cost: paid only on candidate bests. Guarantee: resume bars inherit confirmed values.
 
+## :Trivium-anneal: (operator-proposed) — scheduled compound-target weights
+
+Measured: static trivium ⅓/⅓/⅓ ignites fast, fades (E2); static 0.6/0.3/0.1 extends a
+trained line (+30%, lane B). Hypothesis: the right OUTCOME weight is time-varying — high
+early (unbiased MC anchor while V is weak), low late (search precision once V knows things).
+- `QLEARN_TRIVIUM` = start triple "a,b,c"; `QLEARN_TRIVIUM_END` = end triple;
+  `QLEARN_TRIVIUM_WARMUP` = e-folding fraction (reuses the shared :anneal: shape). Weights
+  interpolate per training progress; END empty = static (back-compatible).
+- Tuning (`QLEARN_TRIV_TUNE=1` in the tuner): dims c_start [0.1,0.6], c_end [0.0,0.2],
+  b (search weight, time-fixed) [0.1,0.5], triv_warmup [0.1,0.8]; a = 1−b−c(t).
+  New REGIME suffix `|triv-anneal|v1`. Never hand-picked — Optuna per the standing law.
+
 ## :Graded-opponents: (qlearn.py) — KnightCap's actual headline
 
 [cs/9901002](https://arxiv.org/abs/cs/9901002): the 1650→2150 climb came from ONLINE play vs
