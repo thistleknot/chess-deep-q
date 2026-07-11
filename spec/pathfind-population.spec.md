@@ -1,5 +1,24 @@
 # Merge 11 — Pathfinding: zero-seed population search over weight space
 
+## :Provenance: — the from-scratch purity law (HARD GATE, added 2026-07-11 after 3 erosions)
+
+Every artifact that touches a from-scratch run MUST be derivable from ONLY:
+(1) the rules of chess, (2) declared RNG seeds, (3) hand-typed constants DECLARED in this
+spec (each one listed, e.g. "material 1/4/4/6/12" for the mat lineage — the zero lineage
+declares NONE), (4) hyperparameter settings, (5) the feature DEFINITIONS (hand-written code,
+nothing learned).
+
+BANNED: anything computed from a trained model's weights **or from a trained model's play**
+— that includes seeds, labels, schedules, AND preprocessing statistics. (The violation this
+clause exists for: `models/zca.npz` was computed from games played by trained `kc7f` —
+scaling statistics only, but it fails the standard; both early populations trained in that
+space and are therefore NOT pure. Their results stand as labeled: "from-scratch-with-
+contaminated-coordinates".)
+
+PRE-RUN CHECKLIST (mandatory, logged in the tree header): for each input file, state its
+generator. Any file whose generator chain touches a trained model ⇒ the run may not be
+called from-scratch.
+
 The research question (operator, 2026-07-11): **can the system FIND the weights itself** —
 no donor seed, no distilled model — by treating training as *pathfinding through weight
 space* (RRT*/A*: spread, branch what's promising, prune what isn't, never bet on one

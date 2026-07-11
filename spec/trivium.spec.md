@@ -55,6 +55,13 @@ seed), **trivium** `0.285,0.341,0.374 → 0.516,0.341,0.143` @ warmup `0.481`
 
 ## Governing rules (unchanged, load-bearing)
 
+**:Provenance: (added 2026-07-11):** any run claiming "from scratch" must pass the purity
+law in spec/pathfind-population.spec.md — every input derivable from rules + RNG + declared
+constants + hyperparams + feature definitions; NOTHING computed from a trained model's
+weights or play (seeds, labels, schedules, preprocessing statistics like ZCA all included).
+Pre-run provenance checklist is mandatory and logged.
+
+
 Single-variable arms with pre-registered falsification · replicate-before-invent ·
 formula/manifold change ⇒ Optuna re-tune, **≤30 min wall, new studies only on operator
 request** · infrastructure vars are controls, never search dims · operator starts final runs
