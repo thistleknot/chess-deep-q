@@ -742,6 +742,7 @@ def main():
                 run_sf_pts += c_pts; run_sf_n += EPOCH_ELO_GAMES   # confirmation joins the run pool
                 print(f"crown check: epoch {strength:.2f} -> confirmed {confirmed:.2f} "
                       f"({'kept' if confirmed > best_strength + 1e-3 else 'rejected'})", flush=True)
+                crown_pool = (ep_sf_pts + c_pts, ep_sf_n + EPOCH_ELO_GAMES)  # :Crown-rung: pooled SF games
                 strength = confirmed
             ep_sf_pts, ep_sf_n = 0.0, 0
             if strength > best_strength + 1e-3:
@@ -751,6 +752,23 @@ def main():
                             "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
                             "strength": strength, "ts": int(time.time())},
                            CKPT.replace(".pt", "_best.pt"))
+                if challenged:
+                    # :Crown-rung:: every KEPT crown feeds the ladder from its pooled SF games —
+                    # zero extra compute; the row is the crown's own evidence (d2-greedy scale).
+                    from measure_elo import elo_diff
+                    _pts, _n = crown_pool
+                    _s = _pts / _n
+                    _se = math.sqrt(max(_s * (1 - _s), 1e-9) / _n)
+                    _row = {"merge": 9, "agent": (f"{TAG} " if TAG else "") +
+                            f"crown {strength:.2f} d2-greedy (live run)",
+                            "ts": int(time.time()), "games": _n,
+                            "vs_sf_W": None, "vs_sf_D": None, "vs_sf_L": None,
+                            "vs_sf_score": round(_s, 4),
+                            "elo": round(1320 + elo_diff(_s, _n)),
+                            "elo_lo": round(1320 + elo_diff(_s - 1.96 * _se, _n)),
+                            "elo_hi": round(1320 + elo_diff(_s + 1.96 * _se, _n))}
+                    with open("data/rl_trend.jsonl", "a") as _fh:
+                        _fh.write(json.dumps(_row) + "\n")
             else:
                 # Horizon fix (efficiency plan step 2): only INFORMATIVE failures age the
                 # run — a REJECTED crown (we challenged and lost) or a clearly-below epoch
