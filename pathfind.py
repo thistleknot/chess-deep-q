@@ -53,6 +53,13 @@ def jitter(gen, lane, reheat=1.0):
             "warmup": float(np.clip(CANON["warmup"] + r.uniform(-0.15, 0.15), 0.1, 0.8))}
 
 
+def explorer(reheat=1.0):
+    """Dedicated high-τ scout (operator: 'leave one for exploration'): canon knobs with τ
+    pinned hot — never anneals into an exploiter; when forked from the top node it keeps
+    exploring from the best-known weights (RRT expansion from the best node)."""
+    return dict(CANON, tau_start=min(1.4 * reheat, 3.0), tau_floor=min(0.3 * reheat, 0.5))
+
+
 def triv(cfg):
     a_s = 1.0 - cfg["b_srch"] - cfg["c_start"]
     a_e = 1.0 - cfg["b_srch"] - cfg["c_end"]
@@ -74,7 +81,7 @@ def lane_env(lane, cfg):
                 QLEARN_TRIVIUM=t_start, QLEARN_TRIVIUM_END=t_end,
                 QLEARN_TRIVIUM_WARMUP=f"{cfg['warmup']:.4f}",
                 QLEARN_PARGEN="1", QLEARN_PARGEN_EPS="0.0",
-                QLEARN_PARGEN_SOFTMAX="1",
+                QLEARN_PARGEN_SOFTMAX="1", QLEARN_STALE_REHEAT="0.5",
                 QLEARN_TAU_START=f"{cfg['tau_start']:.4f}",
                 QLEARN_TAU_FLOOR=f"{cfg['tau_floor']:.4f}",
                 QLEARN_PARGEN_THREADS=str(THREADS), QLEARN_PROXY_GAMES="4",
@@ -119,7 +126,9 @@ def main():
     log_tree("|---|---|---|---|---|")
 
     prev = {lane: None for lane in LANE_IDS}
-    configs = {lane: (dict(CANON) if lane == "a" else jitter(0, lane)) for lane in LANE_IDS}
+    configs = {lane: (dict(CANON) if lane == "a" else
+                      explorer() if lane == LANE_IDS[-1] else
+                      jitter(0, lane)) for lane in LANE_IDS}
     reheat, prev_pop_best = 1.0, None                  # :Reheat:: stall -> raise τ, progress -> cool
     for gen in range(1, GENS + 1):
         procs = {}
@@ -165,7 +174,8 @@ def main():
         if gen < GENS:
             for lane in prune:
                 fork(lane, top)
-                configs[lane] = jitter(gen, lane, reheat)
+                configs[lane] = (explorer(reheat) if lane == LANE_IDS[-1]
+                                 else jitter(gen, lane, reheat))
             prev = dict(bars)
 
     log_tree(f"| — | — | final ranking: {' > '.join(ranked)} | {bars[ranked[0]]} | "

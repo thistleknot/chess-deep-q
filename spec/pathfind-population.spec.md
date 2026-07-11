@@ -50,6 +50,13 @@ wash-out under function approximation (DOIE lineage), KnightCap's own material-o
   jittered lanes' τ scale ×1.5 (cap ×4) — local optimum ⇒ temperature up; any improvement
   cools back to ×1. Logged as `REHEAT ×k` tree rows. (v2 refinement: also trigger on
   td_sigma tightening — read from lane metrics.)
+- :Stale-reheat: (in-lane, operator: "as patience increases we do this factoring"):
+  `QLEARN_STALE_REHEAT=k` scales the behavior τ by (1 + k·stale), cap ×4 — every informative
+  failure raises exploration; a kept crown resets stale, so τ cools on progress by
+  construction. Population lanes run k=0.5. Not an Optuna dim (exploration-knob rule).
+- :Explorer-lane: (operator: "leave one for exploration"): the last lane's config is pinned
+  hot (τ 1.4→0.3, canon otherwise) and NEVER re-jittered toward exploitation — when forked
+  from the top node it keeps exploring from the best-known weights (RRT expansion from best).
 - Each lane = detached `qlearn.py 1000 2` subprocess with the canon env
   (TDLEAF+KC_FAITHFUL+RAMP+ZCA+PARGEN, `QLEARN_PARGEN_THREADS=3`, per-lane
   CKPT/METRICS/TAG=`zero<A..D>`, RESUME=1, CONFIRM=1). qlearn.py is UNTOUCHED; lanes feed

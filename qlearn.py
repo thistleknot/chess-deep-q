@@ -107,6 +107,10 @@ PARGEN_SOFTMAX = int(os.environ.get("QLEARN_PARGEN_SOFTMAX", "0"))  # Merge 11 :
 # optimism-directed exploration (inflated init values attract visits until deflated); pairs
 # with the optimistic zero seed. Set eps=0 when on (τ subsumes uniform exploration).
 # Requires rsearch module ≥ v3.6 (play_games tau kwarg).
+STALE_REHEAT = float(os.environ.get("QLEARN_STALE_REHEAT", "0"))    # Merge 11 :Stale-reheat::
+# k>0 scales the behavior temperature by (1 + k·stale), capped x4 — the operator's local-
+# minimum rule INSIDE a lane: each informative failure (rejected crown / clearly-below epoch)
+# raises exploration; a new crown resets stale, so τ cools on progress by construction.
 RSEARCH_D  = int(os.environ.get("QLEARN_RSEARCH_DEPTH", "0"))  # Merge 8 (spec/rust-search.spec.md):
 # >0 -> generation/measurement moves, TDLeaf leaf targets, and predicted replies come from the
 # native FULL-WIDTH alpha-beta + quiescence at this depth (KnightCap-grade targets). Greedy
@@ -593,6 +597,8 @@ def main():
     while games_played < total_games:
         chunk = min(batch_games, total_games - games_played, epoch_games - ep_games)
         tau = tau_at(games_played, total_games, cum_games)     # metrics row + serial behavior
+        if STALE_REHEAT > 0:
+            tau *= min(1.0 + STALE_REHEAT * stale, 4.0)        # :Stale-reheat:
         new_pairs = []
         game_data = []                          # per game: (xs, gvs, z, predicted, signs)
         if PARGEN > 0:
@@ -613,6 +619,8 @@ def main():
         else:
             for _ in range(chunk):
                 tau = tau_at(games_played, total_games, cum_games)
+                if STALE_REHEAT > 0:
+                    tau *= min(1.0 + STALE_REHEAT * stale, 4.0)  # :Stale-reheat:
                 if ladder is not None:
                     aw = (games_played % 2 == 0)               # alternate colors vs the ladder
                     reach = (OPP_REACH > 0 and ladder.i < len(ladder.rungs) - 1
