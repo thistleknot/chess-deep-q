@@ -769,7 +769,6 @@ def main():
                 if challenged:
                     # :Crown-rung:: every KEPT crown feeds the ladder from its pooled SF games —
                     # zero extra compute; the row is the crown's own evidence (d2-greedy scale).
-                    from measure_elo import elo_diff
                     _pts, _n = crown_pool
                     _s = _pts / _n
                     _se = math.sqrt(max(_s * (1 - _s), 1e-9) / _n)
