@@ -24,10 +24,14 @@ import time
 import numpy as np
 import torch
 
-GENS = int(sys.argv[1]) if len(sys.argv) > 1 else 6
+GENS = int(sys.argv[1]) if len(sys.argv) > 1 else 6          # safety CAP, not the target
 EPOCH_GAMES = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
 EPOCHS_PER_GEN = int(sys.argv[3]) if len(sys.argv) > 3 else 2
 NLANES = int(sys.argv[4]) if len(sys.argv) > 4 else 4
+RESUME_POP = int(sys.argv[5]) if len(sys.argv) > 5 else 0    # 1 = continue existing lanes
+# (weights carry over; configs re-evolve from canon/explorer/jitter — not persisted)
+GOAL_BAR = float(sys.argv[6]) if len(sys.argv) > 6 else 0.0  # stop when pop best crown bar
+# reaches this (bar 26.4 ~ 1100 on the d2-greedy Elo scale); 0 = run to the GENS cap
 
 SEED_FILE = "models/qlearn_zero_seed.pt"
 TREE = "data/pathfind_tree.md"
@@ -117,13 +121,14 @@ def log_tree(line):
 
 def main():
     os.makedirs("data", exist_ok=True)
-    seed = torch.load(SEED_FILE, map_location="cpu")
-    for lane in LANE_IDS:                              # every lane starts at the SAME zero node
-        torch.save(seed, f"models/qlearn_zero_{lane}.pt")
-        torch.save(seed, f"models/qlearn_zero_{lane}_best.pt")
+    if not RESUME_POP:
+        seed = torch.load(SEED_FILE, map_location="cpu")
+        for lane in LANE_IDS:                          # every lane starts at the SAME zero node
+            torch.save(seed, f"models/qlearn_zero_{lane}.pt")
+            torch.save(seed, f"models/qlearn_zero_{lane}_best.pt")
     log_tree(f"\n## Population run {time.strftime('%Y-%m-%d %H:%M')} — "
-             f"{NLANES} lanes x {GENS} gens x {EPOCHS_PER_GEN}x{EPOCH_GAMES} games "
-             f"(threads/lane {THREADS})")
+             f"{NLANES} lanes x <= {GENS} gens x {EPOCHS_PER_GEN}x{EPOCH_GAMES} games "
+             f"(threads/lane {THREADS}, resume={RESUME_POP}, goal bar {GOAL_BAR or '—'})")
     log_tree("| gen | lane | config | bar | action |")
     log_tree("|---|---|---|---|---|")
 
@@ -155,6 +160,13 @@ def main():
         prune = [l for l in ranked[-(NLANES // 2):] if l != best_slope and l != top]
 
         pop_best = bars[ranked[0]]
+        if GOAL_BAR > 0 and pop_best is not None and pop_best >= GOAL_BAR:
+            log_tree(f"| {gen} | — | GOAL REACHED: pop best {pop_best:.2f} >= {GOAL_BAR} "
+                     f"(~1100 d2-greedy) | — | — |")
+            for lane in LANE_IDS:
+                b = "—" if bars[lane] is None else f"{bars[lane]:.2f}"
+                log_tree(f"| {gen} | {lane} | final | {b} | — |")
+            break
         if pop_best is not None:
             if prev_pop_best is not None and pop_best <= prev_pop_best + 1e-3:
                 reheat = min(reheat * 1.5, 4.0)        # stall: turn the temperature up
