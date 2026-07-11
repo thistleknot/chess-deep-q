@@ -80,7 +80,10 @@ def lane_env(lane, cfg):
                 QLEARN_WARMUP="0.5", QLEARN_PATIENCE="99",     # population prunes, not patience
                 QLEARN_ELO_GAMES="0", QLEARN_EPOCH_ELO_GAMES="24", QLEARN_LOG_EVERY="500",
                 QLEARN_BATCH_GAMES="200", QLEARN_FREEZE_EPOCH="1", QLEARN_RESUME="1",
-                QLEARN_ANCHOR="1", QLEARN_TDLEAF="1", QLEARN_OPP="self", QLEARN_ENC="kc",
+                # ANCHOR=0 (council round #5): lanes must ACCEPT downhill moves (Metropolis
+                # lesson) — an inner revert-to-best ratchet fights the outer PBT selection
+                # and freezes leaders at exact bars; the population sync IS the safety net.
+                QLEARN_ANCHOR="0", QLEARN_TDLEAF="1", QLEARN_OPP="self", QLEARN_ENC="kc",
                 QLEARN_CONFIRM="1", QLEARN_RAMP="1", QLEARN_KC_FAITHFUL="1",
                 QLEARN_RSEARCH_DEPTH="2", QLEARN_RSEARCH_MOD="rsearch4",
                 QLEARN_ZCA="models/zca.npz",
