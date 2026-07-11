@@ -41,6 +41,8 @@ TRIV_TUNE = os.environ.get("QLEARN_TRIV_TUNE", "0") == "1"    # :Trivium-anneal:
 # c_end, b_srch, triv_warmup); a = 1-b-c(t). Search-space change -> new fingerprint.
 ZCA_ENV  = os.environ.get("QLEARN_ZCA", "")                   # whitened training (E3 treatment);
 # with kc+TDLEAF, trials seed from models/qlearn_wseed.pt (pristine whitened) instead
+PARGEN_ENV = os.environ.get("QLEARN_PARGEN", "")              # Merge 9 native parallel generation —
+# changes the BEHAVIOR/TARGET machinery (greedy+eps exact-min batches vs serial python) -> identity
 ENC      = os.environ.get("QLEARN_ENC", "pst")                # pst | kc (Merge 6 donor features) —
 # changes the INPUT manifold -> study identity; kc trials run FRESH nets (champion seed is 769-dim)
 OPP      = os.environ.get("QLEARN_OPP", "self")               # self | graded — changes the TRAINING
@@ -91,6 +93,8 @@ else:
         SPACE += "|c_start[0.1,0.6]|c_end[0,0.2]|b_srch[0.1,0.5]|triv_warmup[0.1,0.8]"
     if ZCA_ENV:
         REGIME += "|zca|v1"
+    if PARGEN_ENV:
+        REGIME += "|pargen|v1"
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
 BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # (q) behavior policy — study identity
 CURRICULUM = os.environ.get("QLEARN_CURRICULUM", "0")          # exploring-starts fraction (passthrough
@@ -155,7 +159,8 @@ def run_trial(p, trial_no):
                        QLEARN_DEV=os.environ.get("QLEARN_DEV", "cpu"))
             for k in ("QLEARN_ZCA", "QLEARN_RSEARCH_DEPTH", "QLEARN_RSEARCH_MOD",
                       "QLEARN_KC_FAITHFUL", "QLEARN_RAMP", "QLEARN_OPP_REACH",
-                      "QLEARN_CONFIRM"):
+                      "QLEARN_CONFIRM", "QLEARN_PARGEN", "QLEARN_PARGEN_OPP_D",
+                      "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if TRIV_TUNE:

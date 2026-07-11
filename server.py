@@ -122,6 +122,11 @@ class TrainReq(BaseModel):
     device: str = ""              # "" = trainer default; "cpu" recommended for search (small batches)
     lineage: str = ""             # checkpoint lineage name -> models/<algo>_<lineage>.pt; isolates
                                   # concurrent experiment lines (a fresh run only deletes ITS lineage's best)
+    pargen: int = 0               # (q) Merge 9 :Parallel-generation:: >0 = native parallel self-play
+                                  # batches (greedy+eps behavior, exact-min targets); excludes opp=graded
+    pargen_eps: float = 0.1       # (q) epsilon: state-coverage exploration in native generation
+    pargen_threads: int = 12      # (q) native generation worker threads
+    pargen_opp_d: int = 1         # (q) frozen-self opponent depth in native generation (0 = random)
     # --- advanced knobs (API-only; the form doesn't render them, pydantic defaults apply) ---
     algo: str = "q"               # q = Merge 2 Q-learning | ac = Merge 3 online actor-critic
     alpha_theta: float = 1e-4     # (ac) actor step size — slower than critic (two-timescale)
@@ -241,6 +246,10 @@ def api_train_start(cfg: TrainReq):
                QLEARN_TRIVIUM_END=cfg.trivium_end,
                QLEARN_TRIVIUM_WARMUP=f"{cfg.trivium_warmup:.4f}",
                QLEARN_PROXY_GAMES=str(cfg.proxy_games),
+               QLEARN_PARGEN=str(cfg.pargen),
+               QLEARN_PARGEN_EPS=f"{cfg.pargen_eps:.3f}",
+               QLEARN_PARGEN_THREADS=str(cfg.pargen_threads),
+               QLEARN_PARGEN_OPP_D=str(cfg.pargen_opp_d),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
                QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"
                             f"{cfg.lineage}.pt" if cfg.lineage else
@@ -320,7 +329,7 @@ PAGE = r"""<!doctype html>
   .card h2{font-size:13px;margin:0 0 14px;color:#7d8590;text-transform:uppercase;letter-spacing:.04em;}
   .form{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:14px;}
   label{display:block;color:#7d8590;font-size:12px;margin-bottom:3px;}
-  input[type=number]{width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px;}
+  input[type=number],input[type=text]{width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px;}
   button{background:#238636;color:#fff;border:0;border-radius:7px;padding:9px 15px;font-size:14px;font-weight:600;cursor:pointer;}
   button:hover{background:#2ea043;} button.alt{background:#1f6feb;} button.alt:hover{background:#388bfd;}
   button.grey{background:#30363d;} button.stop{background:#da3633;} button:disabled{opacity:.5;cursor:not-allowed;}
@@ -368,6 +377,19 @@ PAGE = r"""<!doctype html>
       <div><label>algo</label><select id="algo" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
         <option value="q">q-learn (M2)</option><option value="ac">actor-critic (M3)</option></select></div>
       <div><label>adaptive λ</label><input id="adaptive" type="checkbox" checked style="width:auto"></div>
+      <div><label>KC faithful (M7)</label><input id="kc_faithful" type="checkbox" style="width:auto"></div>
+      <div><label>RAMP filter (M7)</label><input id="ramp" type="checkbox" style="width:auto"></div>
+      <div><label>confirmed crowns</label><input id="confirm" type="checkbox" checked style="width:auto"></div>
+      <div><label>native search depth (M8, 0=off)</label><input id="rsearch_depth" type="number" value="0" min="0"></div>
+      <div><label>native module</label><input id="rsearch_mod" type="text" value="rsearch3"></div>
+      <div><label>ZCA (path, empty=off)</label><input id="zca" type="text" value=""></div>
+      <div><label>trivium start "λ,search,outcome"</label><input id="trivium" type="text" value=""></div>
+      <div><label>trivium end (anneal)</label><input id="trivium_end" type="text" value=""></div>
+      <div><label>trivium warmup</label><input id="trivium_warmup" type="number" step="0.001" value="0.4"></div>
+      <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" style="width:auto"></div>
+      <div><label>pargen threads</label><input id="pargen_threads" type="number" value="12" min="1"></div>
+      <div><label>proxy games / sample</label><input id="proxy_games" type="number" value="20" min="0"></div>
+      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value=""></div>
     </div>
     <div class="row">
       <button class="alt" onclick="loadBest()">⬇ Load Optuna best</button>
@@ -427,7 +449,14 @@ async function loadBest(){
   document.getElementById('warmup').value=j.best.warmup.toFixed(3);
   document.getElementById('lam_warmup').value=(j.best.lambda_warmup!=null?j.best.lambda_warmup:j.best.warmup).toFixed(3);
   if(j.best.batch_games!=null) document.getElementById('batch_games').value=j.best.batch_games;
-  document.getElementById('status').textContent=`loaded best of ${j.n} trials (Elo ${j.elo})`;
+  if(j.best.c_start!=null){
+    // :Trivium-anneal: study dims -> env triples "λ,search,outcome"; a = 1 - b - c(t)
+    const b=j.best.b_srch, cs=j.best.c_start, ce=j.best.c_end;
+    document.getElementById('trivium').value=`${(1-b-cs).toFixed(3)},${b.toFixed(3)},${cs.toFixed(3)}`;
+    document.getElementById('trivium_end').value=`${(1-b-ce).toFixed(3)},${b.toFixed(3)},${ce.toFixed(3)}`;
+    document.getElementById('trivium_warmup').value=j.best.triv_warmup.toFixed(3);
+  }
+  document.getElementById('status').textContent=`loaded best of ${j.n} trials (Elo ${j.elo}, study ${j.study.slice(-8)})`;
 }
 async function startTrain(){
   const cfg={alpha:+val('alpha'),gamma:+val('gamma'),lam:+val('lam'),warmup:+val('warmup'),lambda_warmup:+val('lam_warmup'),
@@ -436,7 +465,12 @@ async function startTrain(){
     batch_games:+val('batch_games'),freeze_epoch:document.getElementById('freeze').checked,
     resume:document.getElementById('resume').checked,algo:val('algo'),anchor:document.getElementById('anchor').checked,
     adaptive_lambda:document.getElementById('adaptive').checked,tdleaf:document.getElementById('tdleaf').checked,
-    opp:val('opp'),enc:val('enc')};
+    opp:val('opp'),enc:val('enc'),
+    kc_faithful:document.getElementById('kc_faithful').checked,ramp:document.getElementById('ramp').checked,
+    confirm:document.getElementById('confirm').checked,rsearch_depth:+val('rsearch_depth'),
+    rsearch_mod:val('rsearch_mod'),zca:val('zca'),trivium:val('trivium'),trivium_end:val('trivium_end'),
+    trivium_warmup:+val('trivium_warmup'),pargen:document.getElementById('pargen').checked?1:0,
+    pargen_threads:+val('pargen_threads'),proxy_games:+val('proxy_games'),lineage:val('lineage')};
   const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   const j=await r.json();
   document.getElementById('status').textContent=j.ok?`training started (pid ${j.pid})`:('busy: '+j.msg);
