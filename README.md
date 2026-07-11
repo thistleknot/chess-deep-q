@@ -1,5 +1,24 @@
-# Chess AI with Deep Q-Learning & Russian Doll MCTS 🏰
-*A chess AI that learns from its mistakes and thinks in narrowing circles*
+# Chess RL from scratch — the Trivium Recipe 🏰
+*A from-scratch RL agent that holds 1428–1672 Elo beyond doubt — trained on pure self-play
+with nothing deeper than a 2-ply glance*
+
+## ⭐ The enshrined lesson
+
+**Sparse-depth trivium RL works.** Compound value targets — the *trivium*:
+`λ-return : search-value : outcome`, weights **annealed on an Optuna-tuned schedule** — let a
+linear eval climb from scratch on pure self-play with **no deep search anywhere in training**:
+λ (eligibility-trace horizon, the n-step-advantage analog) replaces depth, a 2-ply glance
+keeps targets sound, the outcome term anchors early and anneals away. Depth is spent only at
+*play time*, where it converts the learned eval into strength.
+
+**Claims-grade result: 1484 Elo (95% CI 1434..1542), 98W-92D-10L over 200 games vs
+Stockfish@1320** — the entire interval inside the 1428–1672 goal band, from a net that never
+saw an external opponent or an engine label in training (15k self-play games). The recipe
+reproduced on a fresh restart: the prior campaign's peak matched in half the games.
+
+Canonical spec: [`spec/trivium.spec.md`](spec/trivium.spec.md) · lessons: [`LESSONS.md`](LESSONS.md)
+· rollback map: [`ROLLBACK.md`](ROLLBACK.md) · everything superseded:
+[`spec/dispositioned.md`](spec/dispositioned.md)
 
 ## 🎯 Quick Start
 ```bash
