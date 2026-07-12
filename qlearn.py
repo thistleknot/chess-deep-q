@@ -94,8 +94,10 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # (set QLEARN_RSEARCH_DEPTH=0, PARGEN=0; TDLeaf targets come from the python beam search).
 if ENC == "hk":
     from kanerva_enc import active5k, K_IN as NIN_ENC
-    def ENC_FN(board, _a=active5k):        # round 2 S7/S8: the 5121 paper set AS ITSELF
-        x = np.zeros(NIN_ENC, dtype=np.float32)
+    def ENC_FN(board, _a=active5k, _n=NIN_ENC):   # round 2 S7/S8: the 5121 paper set AS ITSELF
+        # _n bound at DEF time: the ZCA/PCA wrap rebinds global NIN_ENC to the reduced dim
+        # (512 for pca5k) — late-binding here built a 512 vector for 5121 indices (IndexError)
+        x = np.zeros(_n, dtype=np.float32)
         x[_a(board)] = 1.0
         return x
 elif ENC == "kx":
@@ -1067,4 +1069,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # Fail FAST and DEAD: an exception after the SF/ladder engines spawn leaves their
+        # non-daemon UCI threads alive, zombifying the process — the parent tune's
+        # subprocess.run then blocks for its full 4h timeout on a corpse (observed:
+        # pca5k trial, 2.5h silent). Print the trace, then hard-exit past thread joins.
+        import traceback
+        traceback.print_exc()
+        os._exit(1)
