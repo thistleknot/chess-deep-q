@@ -35,7 +35,11 @@ def live_rows():
                            ("bake kc-zca", "809", "bake_kc-zca"),
                            ("bake pca-320", "PCA", "bake_pca-320"),
                            ("bake nk-512", "Kanerva", "bake_nk-512"),
-                           ("bake k809-2048", "Kanerva", "bake_k809")):
+                           ("bake k809-2048", "Kanerva", "bake_k809"),
+                           ("organ surprise", "809", "organ_surprise"),
+                           ("organ +GRPO", "809", "organ_grpo"),
+                           ("organ +replayT", "809", "organ_replayt"),
+                           ("organ DDQN", "809", "organ_ddqn")):
         p = f"data/{tag}.log"
         if os.path.exists(p):
             m = re.search(r"best elo ([0-9.]+)", open(p, errors="replace").read())
