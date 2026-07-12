@@ -34,7 +34,8 @@ def live_rows():
     for name, fam, tag in (("bake kc-raw", "809", "bake_kc-raw"),
                            ("bake kc-zca", "809", "bake_kc-zca"),
                            ("bake pca-320", "PCA", "bake_pca-320"),
-                           ("bake nk-512", "Kanerva", "bake_nk-512")):
+                           ("bake nk-512", "Kanerva", "bake_nk-512"),
+                           ("bake k809-2048", "Kanerva", "bake_k809")):
         p = f"data/{tag}.log"
         if os.path.exists(p):
             m = re.search(r"best elo ([0-9.]+)", open(p, errors="replace").read())

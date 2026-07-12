@@ -83,7 +83,12 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
 # -> part of every checkpoint and study identity. nk is python-only: no native searcher eval
 # (set QLEARN_RSEARCH_DEPTH=0, PARGEN=0; TDLeaf targets come from the python beam search).
-if ENC == "nk":
+if ENC == "k8":
+    from kanerva_enc import encode_kanerva809 as _k8
+    from kanerva_enc import K8_OUT as NIN_ENC
+    def ENC_FN(board, _k=_k8, _e=encode_features):    # :Kanerva-809: expansion (bake set 5)
+        return _k(_e(board))
+elif ENC == "nk":
     from kanerva_enc import encode_kanerva as ENC_FN, K_OUT as NIN_ENC
 else:
     ENC_FN     = encode_features if ENC == "kc" else encode

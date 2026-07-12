@@ -52,3 +52,16 @@ def encode_kanerva(board):
     for d in active5k(board):
         out[_members[d]] += 1.0
     return out
+
+
+# --- :Kanerva-809: (bake set #5) — EXPANSION over the proven 809 donor features -----------
+# More prototypes than inputs: each output is a sparse random projection (soft conjunction)
+# of the 809 — nonlinearity without hidden layers (classic SDM use). Declared constants.
+K8_OUT = 2048
+_rng8 = np.random.default_rng(13)
+_M8 = (_rng8.random((K8_OUT, 809)) < (1.0 / 32.0)).astype(np.float32)
+
+
+def encode_kanerva809(x809):
+    """809 raw features -> 2048 overlap/projection counts."""
+    return _M8 @ x809
