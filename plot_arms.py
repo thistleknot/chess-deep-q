@@ -45,7 +45,10 @@ def live_rows():
                            ("bake2 5k raw", "Kanerva", "bake2_hk5k"),
                            ("bake2 5k std", "Kanerva", "bake2_hk5k-std"),
                            ("bake2 809+conj", "Kanerva", "bake2_concat"),
-                           ("bake2 5k PCA-512", "PCA", "bake2_pca5k")):
+                           ("bake2 5k PCA-512", "PCA", "bake2_pca5k"),
+                           ("organ lr-warmup", "809", "bake3_lrwu"),
+                           ("organ phase-mix", "809", "bake3_phase"),
+                           ("organ dis-gamma", "809", "bake3_disgamma")):
         p = f"data/{tag}.log"
         if os.path.exists(p):
             m = re.search(r"best elo ([0-9.]+)", open(p, errors="replace").read())

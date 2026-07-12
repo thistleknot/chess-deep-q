@@ -41,6 +41,9 @@ REPLAY_TUNE = os.environ.get("QLEARN_REPLAY_TUNE", "0") == "1"  # Merge 15 :Repl
 # dim (replay_t, log): the admixture dial — new manifold knob, searched not hand-picked.
 TRIV_TUNE = os.environ.get("QLEARN_TRIV_TUNE", "0") == "1"    # :Trivium-anneal: dims (c_start,
 # c_end, b_srch, triv_warmup); a = 1-b-c(t). Search-space change -> new fingerprint.
+LRWU_TUNE  = os.environ.get("QLEARN_LRWU_TUNE", "0") == "1"   # :LR-warmup: dim (spec/schedules)
+PHASE_TUNE = os.environ.get("QLEARN_PHASE_TUNE", "0") == "1"  # :Phase-mix: dim
+DISG_TUNE  = os.environ.get("QLEARN_DISG_TUNE", "0") == "1"   # :Dis-gamma: dim
 ZCA_ENV  = os.environ.get("QLEARN_ZCA", "")                   # whitened training (E3 treatment);
 # with kc+TDLEAF, trials seed from models/qlearn_wseed.pt (pristine whitened) instead
 PARGEN_ENV = os.environ.get("QLEARN_PARGEN", "")              # Merge 9 native parallel generation —
@@ -66,6 +69,12 @@ if TRIV_TUNE:
     PRIOR = dict(PRIOR, c_start=0.374, c_end=0.143, b_srch=0.341, triv_warmup=0.481)
 if REPLAY_TUNE:
     PRIOR = dict(PRIOR, replay_t=1.0, surprise_k=32.0)
+if LRWU_TUNE:
+    PRIOR = dict(PRIOR, lr_warmup=0.25)      # organ midpoints: trial 0 = proven parms + organ ON
+if PHASE_TUNE:
+    PRIOR = dict(PRIOR, phase_mix=0.5)
+if DISG_TUNE:
+    PRIOR = dict(PRIOR, dis_gamma=0.4)
 if TDLEAF:
     # S&B §9.6 rule of thumb (skill 086_step-size): α ≈ 1/(τ·E[||x||²]) ≈ 1/(100 experiences ·
     # ~33 active features) ≈ 3e-4 — and measured: α=3e-3 (trial 0, self-play arm) still damaged
@@ -114,6 +123,15 @@ else:
         SPACE += "|replay_t[0.1,5]log|surprise_k[8,64]log"
     if os.environ.get("QLEARN_DECK"):
         REGIME += "|deck|v1"
+    if LRWU_TUNE:
+        REGIME += "|lr-warmup|v1"                        # :Schedules: organs (one per study)
+        SPACE += "|lr_warmup[0.0,0.5]"
+    if PHASE_TUNE:
+        REGIME += "|phase-mix|v1"
+        SPACE += "|phase_mix[0.0,1.0]"
+    if DISG_TUNE:
+        REGIME += "|dis-gamma|v1"
+        SPACE += "|dis_gamma[0.0,0.8]"
     if os.environ.get("QLEARN_TUNE_SEED"):
         REGIME += "|seed-" + os.environ["QLEARN_TUNE_SEED"].split("/")[-1].replace(".pt", "")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
@@ -185,12 +203,19 @@ def run_trial(p, trial_no):
                       "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS",
                       "QLEARN_PARGEN_SOFTMAX", "QLEARN_STALE_REHEAT", "QLEARN_TUNE_SEED",
                       "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK", "QLEARN_DDQN",
-                      "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY"):
+                      "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY",
+                      "QLEARN_LR_WARMUP", "QLEARN_PHASE_MIX", "QLEARN_DIS_GAMMA"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:
                 env["QLEARN_REPLAY_T"] = f"{p['replay_t']:.3f}"
                 env["QLEARN_SURPRISE_K"] = f"{p['surprise_k']:.1f}"
+            if LRWU_TUNE:
+                env["QLEARN_LR_WARMUP"] = f"{p['lr_warmup']:.3f}"
+            if PHASE_TUNE:
+                env["QLEARN_PHASE_MIX"] = f"{p['phase_mix']:.3f}"
+            if DISG_TUNE:
+                env["QLEARN_DIS_GAMMA"] = f"{p['dis_gamma']:.3f}"
             if TRIV_TUNE:
                 a_s = 1.0 - p["b_srch"] - p["c_start"]
                 a_e = 1.0 - p["b_srch"] - p["c_end"]
@@ -230,6 +255,12 @@ def objective(trial):
             p["c_end"] = trial.suggest_float("c_end", 0.0, 0.2)
             p["b_srch"] = trial.suggest_float("b_srch", 0.1, 0.5)
             p["triv_warmup"] = trial.suggest_float("triv_warmup", 0.1, 0.8)
+        if LRWU_TUNE:
+            p["lr_warmup"] = trial.suggest_float("lr_warmup", 0.0, 0.5)
+        if PHASE_TUNE:
+            p["phase_mix"] = trial.suggest_float("phase_mix", 0.0, 1.0)
+        if DISG_TUNE:
+            p["dis_gamma"] = trial.suggest_float("dis_gamma", 0.0, 0.8)
     elo = run_trial(p, trial.number)
     print(f"trial {trial.number}: elo {elo:.0f}  {p}", flush=True)
     return elo

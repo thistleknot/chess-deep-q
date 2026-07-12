@@ -41,6 +41,15 @@ METRICS = os.environ.get("QLEARN_METRICS", "data/qlearn_metrics.jsonl")   # over
 
 # --- QLEARN_* knobs (Optuna sweeps these via env) -------------------------------------------
 ALPHA      = float(os.environ.get("QLEARN_ALPHA", "3e-3"))     # SGD/Adam step size α
+LR_WARMUP  = float(os.environ.get("QLEARN_LR_WARMUP", "0"))    # :LR-warmup: (spec/schedules.spec.md)
+# fraction of training over which α ramps LINEARLY 5%->100% then holds; 0 = constant α (baseline).
+# Timestep-only by design: Adam's second moment already supplies the reactive per-parameter part.
+PHASE_MIX  = float(os.environ.get("QLEARN_PHASE_MIX", "0"))    # :Phase-mix: (spec/schedules.spec.md)
+# per-position trivium-mix gain keyed on NEUTRAL phase (TOTAL board material — never the signed
+# advantage, which truncates credit on compensation lines). Requires raw planes at x[:768].
+DIS_GAMMA  = float(os.environ.get("QLEARN_DIS_GAMMA", "0"))    # :Dis-gamma: (spec/schedules.spec.md)
+# per-position discount gain keyed on |search value − net value|: hot positions shorten the credit
+# horizon (γ_k ∈ (0, γ] — per-position n_eff control), quiet positions keep it long.
 GAMMA      = float(os.environ.get("QLEARN_GAMMA", "0.99"))     # discount (shorter mate worth more)
 LAMBDA     = float(os.environ.get("QLEARN_LAMBDA", "0.7"))     # TD↔MC dial; 0=1-step Q, 1=MC
 LAMBDA_START = float(os.environ.get("QLEARN_LAMBDA_START", "0.95"))  # λ anneal: MC-heavy while V is
@@ -121,6 +130,9 @@ if ZCA:
     else:
         def ENC_FN(board, _e=_base_enc):                       # noqa: F811 — deliberate wrap
             return _ZCA_Z @ (_e(board) - _ZCA_MU)
+if PHASE_MIX > 0 and (ENC not in ("pst", "kc", "kx") or _ZCA_Z is not None):
+    raise SystemExit(":Phase-mix: requires raw piece planes at x[:768] "
+                     "(ENC pst|kc|kx, no ZCA/std wrap) — refusing a silent no-op")
 RSEARCH_MOD = os.environ.get("QLEARN_RSEARCH_MOD", "rsearch")  # native module name (rsearch2 =
 # side-built v2/v3 while the primary .pyd is file-locked by an older run)
 PARGEN     = int(os.environ.get("QLEARN_PARGEN", "0"))         # Merge 9 (spec/parallel-generation.
@@ -452,7 +464,10 @@ def play_game(agent, tau, rng, env, opp_move=None, agent_white=True):
     return xs, gvs, z, predicted, signs
 
 
-def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=None):
+_SCHED_DBG = {"p": None, "gk": None}     # last-game schedule means (:Schedules: debug print)
+
+
+def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=None, vnet=None):
     """λ-return targets for each visited afterstate. Reward is 0 until the terminal (White-absolute z);
     the bootstrap for step k is the GREEDY value at position k+1 (off-policy max), 0 at the terminal step.
     `lam` is the (possibly variance-adapted) eligibility-trace λ for this epoch.
@@ -469,32 +484,43 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=
     zc = z if z_out is None else z_out       # :Rating-surprise:: outcome COMPONENT only —
     # the λ-return's terminal reward stays raw z (game truth); the trivium's c-term anchors
     # on the peer-relative surprise when provided.
+    gk = None                                # :Dis-gamma:: per-step discount γ_k ∈ (0, γ] —
+    if DIS_GAMMA > 0 and vnet is not None:   # hot positions (search↔net disagreement) pull the
+        gk = [GAMMA * (1.0 - DIS_GAMMA * min(abs(gvs[k] - vnet[k]), 1.0))   # credit horizon in
+              for k in range(T)]
+        _SCHED_DBG["gk"] = round(float(np.mean(gk)), 4)
     if not (RAMP and TDLEAF) or predicted is None:
-        rewards = [0.0] * T
-        rewards[-1] = z
-        dones = [False] * T
-        dones[-1] = True
-        boot = [gvs[k + 1] if k + 1 < T else 0.0 for k in range(T)]
-        G = lambda_return(rewards, boot, dones, lam, gamma=GAMMA)
+        if gk is None:
+            rewards = [0.0] * T
+            rewards[-1] = z
+            dones = [False] * T
+            dones[-1] = True
+            boot = [gvs[k + 1] if k + 1 < T else 0.0 for k in range(T)]
+            G = lambda_return(rewards, boot, dones, lam, gamma=GAMMA)
+        else:                                # same λ-return in residual form, per-step γ_k
+            G, acc = [0.0] * T, 0.0
+            for k in range(T - 1, -1, -1):
+                d = (z - gvs[k]) if k + 1 == T else (gk[k] * gvs[k + 1] - gvs[k])
+                acc = d + gk[k] * lam * acc
+                G[k] = gvs[k] + acc
         if triv is not None:
-            a, b, c = triv
-            G = [a * G[k] + b * gvs[k] + c * zc for k in range(T)]
+            G = apply_triv(G, gvs, zc, triv, xs)
         return xs, G
     deltas = [0.0] * T
     for k in range(T):
         terminal = (k + 1 == T)
-        d = (z - gvs[k]) if terminal else (GAMMA * gvs[k + 1] - gvs[k])
+        g_k = gk[k] if gk is not None else GAMMA
+        d = (z - gvs[k]) if terminal else (g_k * gvs[k + 1] - gvs[k])
         ramped = terminal or not predicted[k + 1]
         if ramped and d * signs[k] > 0:                        # favorable surprise -> no credit
             d = 0.0
         deltas[k] = d
     G, acc = [0.0] * T, 0.0
     for k in range(T - 1, -1, -1):                             # G_k = gv_k + Σ (γλ)^{j-k} δ_j
-        acc = deltas[k] + GAMMA * lam * acc
+        acc = deltas[k] + (gk[k] if gk is not None else GAMMA) * lam * acc
         G[k] = gvs[k] + acc
-    if triv is not None:                                       # compound target (operator trivium):
-        a, b, c = triv                                         # λ-return : search value : outcome
-        G = [a * G[k] + b * gvs[k] + c * zc for k in range(T)]
+    if triv is not None:                                       # compound target (operator trivium)
+        G = apply_triv(G, gvs, zc, triv, xs)
     return xs, G
 
 
@@ -507,6 +533,34 @@ def material_points(x):
     for pt in range(6):
         m += _PVAL[pt] * (x[pt * 64:(pt + 1) * 64].sum() - x[(pt + 6) * 64:(pt + 7) * 64].sum())
     return float(m)
+
+
+def phase_of(x):
+    """Neutral game phase from raw planes: TOTAL material on board (both colors SUMMED, kings
+    excluded), normalized by the full-board 78 -> p ∈ [0,1] (1 = opening). NEVER the signed
+    advantage — a rejected schedule key (it truncates credit on compensation lines).
+    Requires raw piece planes at x[:768] (guarded at startup)."""
+    m = 0.0
+    for pt in range(5):                      # P N B R Q — kings carry value 0, slices skipped
+        m += _PVAL[pt] * (x[pt * 64:(pt + 1) * 64].sum() + x[(pt + 6) * 64:(pt + 7) * 64].sum())
+    return min(1.0, float(m) / 78.0)
+
+
+def apply_triv(G, gvs, zc, triv, xs):
+    """Compound trivium mix a·λ-return + b·search + c·outcome, with optional :Phase-mix: —
+    per-position c_k = c·(1 + PM·(p_k − 0.5)) capped so b_k ≥ 0; b absorbs the complement so the
+    mix mass a+b+c is preserved (Maintain clause, spec/schedules.spec.md). Opening leans OUTCOME,
+    endgame leans SEARCH. PHASE_MIX=0 reproduces the flat mix exactly."""
+    a, b, c = triv
+    if PHASE_MIX <= 0:
+        return [a * G[k] + b * gvs[k] + c * zc for k in range(len(G))]
+    ps = [phase_of(xs[k]) for k in range(len(G))]
+    _SCHED_DBG["p"] = round(float(np.mean(ps)), 3)
+    out = []
+    for k in range(len(G)):
+        ck = min(max(c * (1.0 + PHASE_MIX * (ps[k] - 0.5)), 0.0), b + c)
+        out.append(a * G[k] + (b + c - ck) * gvs[k] + ck * zc)
+    return out
 
 
 def adapt_lambda(lam_base, td_sigma):
@@ -672,6 +726,10 @@ def main():
         tau = tau_at(games_played, total_games, cum_games)     # metrics row + serial behavior
         if STALE_REHEAT > 0:
             tau *= min(1.0 + STALE_REHEAT * stale, 4.0)        # :Stale-reheat:
+        if LR_WARMUP > 0:                                      # :LR-warmup:: linear 5%->100% ramp
+            _frac = (cum_games + games_played) / max(1, cum_games + total_games)
+            for _pg in opt.param_groups:
+                _pg["lr"] = ALPHA * min(1.0, max(0.05, _frac / LR_WARMUP))
         new_pairs = []
         game_data = []                          # per game: (xs, gvs, z, predicted, signs)
         if PARGEN > 0:
@@ -779,13 +837,18 @@ def main():
                 with torch.no_grad():
                     lv = agent.net(torch.from_numpy(np.stack(xs)).to(dev)).cpu().numpy().reshape(-1)
                 boot_gvs = lv.tolist()
-                xt, G = build_targets(xs, boot_gvs, z, lam_eff, pred_f, sgn, None, z_out)
+                xt, G = build_targets(xs, boot_gvs, z, lam_eff, pred_f, sgn, None, z_out,
+                                      gvs if DIS_GAMMA > 0 else None)  # dis = |live − frozen|
                 if triv_now is not None:
-                    a_t, b_t, c_t = triv_now
                     zc = z if z_out is None else z_out
-                    G = [a_t * G[k] + b_t * gvs[k] + c_t * zc for k in range(len(G))]
+                    G = apply_triv(G, gvs, zc, triv_now, xs)
             else:
-                xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out)
+                vnet = None
+                if DIS_GAMMA > 0 and xs:                       # :Dis-gamma:: net's static values
+                    with torch.no_grad():
+                        vnet = agent.net(torch.from_numpy(np.stack(xs)).to(dev)
+                                         ).cpu().numpy().reshape(-1).tolist()
+                xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out, vnet)
             for x, g in zip(xt, G):
                 new_pairs.append((x, g))
                 if not KC_FAITHFUL:
@@ -871,6 +934,9 @@ def main():
                   f"loss {row['loss']:.4f} | pts {row['avg_points']} turns {row['avg_turns']} | "
                   f"sf {sf_pts if sf_pts is not None else '-'}/{EPOCH_ELO_GAMES} (elo {epoch_elo if epoch_elo is not None else '-'}) | vs_heur {wr_heur:.2f} | "
                   f"{time.time()-t:.0f}s", flush=True)
+            if LR_WARMUP > 0 or PHASE_MIX > 0 or DIS_GAMMA > 0:   # :Schedules: Assert clause
+                print(f"  sched | lr {opt.param_groups[0]['lr']:.2e} | "
+                      f"mean_p {_SCHED_DBG['p']} | mean_gk {_SCHED_DBG['gk']}", flush=True)
             t = time.time()
         zs_log, losses_log = [], []            # per-batch accumulators reset every row
 
