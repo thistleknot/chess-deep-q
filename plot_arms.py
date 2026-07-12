@@ -39,7 +39,13 @@ def live_rows():
                            ("organ surprise", "809", "organ_surprise"),
                            ("organ +GRPO", "809", "organ_grpo"),
                            ("organ +replayT", "809", "organ_replayt"),
-                           ("organ DDQN", "809", "organ_ddqn")):
+                           ("organ DDQN", "809", "organ_ddqn"),
+                           ("organ GRPO-raw", "809", "bake2_grporaw"),
+                           ("bake2 pst-769", "809", "bake2_pst769"),
+                           ("bake2 5k raw", "Kanerva", "bake2_hk5k"),
+                           ("bake2 5k std", "Kanerva", "bake2_hk5k-std"),
+                           ("bake2 809+conj", "Kanerva", "bake2_concat"),
+                           ("bake2 5k PCA-512", "PCA", "bake2_pca5k")):
         p = f"data/{tag}.log"
         if os.path.exists(p):
             m = re.search(r"best elo ([0-9.]+)", open(p, errors="replace").read())

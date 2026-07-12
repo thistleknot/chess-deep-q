@@ -83,7 +83,19 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
 # -> part of every checkpoint and study identity. nk is python-only: no native searcher eval
 # (set QLEARN_RSEARCH_DEPTH=0, PARGEN=0; TDLeaf targets come from the python beam search).
-if ENC == "k8":
+if ENC == "hk":
+    from kanerva_enc import active5k, K_IN as NIN_ENC
+    def ENC_FN(board, _a=active5k):        # round 2 S7/S8: the 5121 paper set AS ITSELF
+        x = np.zeros(NIN_ENC, dtype=np.float32)
+        x[_a(board)] = 1.0
+        return x
+elif ENC == "kx":
+    from kanerva_enc import encode_kanerva809 as _kx8
+    NIN_ENC = 809 + 2048                   # round 2 S9: 809 ⊕ conjunctions (expansion ON TOP)
+    def ENC_FN(board, _k=_kx8, _e=encode_features):
+        x = _e(board)
+        return np.concatenate([x, _k(x)])
+elif ENC == "k8":
     from kanerva_enc import encode_kanerva809 as _k8
     from kanerva_enc import K8_OUT as NIN_ENC
     def ENC_FN(board, _k=_k8, _e=encode_features):    # :Kanerva-809: expansion (bake set 5)
@@ -103,8 +115,12 @@ if ZCA:
     NIN_ENC = _ZCA_Z.shape[0]              # :PCA-reduce:: k x 809 whitened-PCA transform
     # reduces the input manifold to k components (square 809 = plain ZCA, unchanged)
     _base_enc = ENC_FN
-    def ENC_FN(board, _e=_base_enc):                           # noqa: F811 — deliberate wrap
-        return _ZCA_Z @ (_e(board) - _ZCA_MU)
+    if _ZCA_Z.ndim == 1:                                       # 1-D Z = diagonal standardize
+        def ENC_FN(board, _e=_base_enc):                       # noqa: F811 — deliberate wrap
+            return (_e(board) - _ZCA_MU) * _ZCA_Z
+    else:
+        def ENC_FN(board, _e=_base_enc):                       # noqa: F811 — deliberate wrap
+            return _ZCA_Z @ (_e(board) - _ZCA_MU)
 RSEARCH_MOD = os.environ.get("QLEARN_RSEARCH_MOD", "rsearch")  # native module name (rsearch2 =
 # side-built v2/v3 while the primary .pyd is file-locked by an older run)
 PARGEN     = int(os.environ.get("QLEARN_PARGEN", "0"))         # Merge 9 (spec/parallel-generation.
@@ -689,6 +705,12 @@ def main():
                     if not reach:                              # window = rung-MATCHED games only
                         ladder.report(s)
                     z_out = None
+                    if GRPO and not SURPRISE:
+                        # operator correction: GRPO is score-agnostic — over RAW outcomes the
+                        # group mean itself is the empirical expected-score baseline (the
+                        # rating-free form). Seed z_out with raw z; the :GRPO-group: block
+                        # then replaces it with the whitened group advantage.
+                        z_out = z
                     if SURPRISE:
                         # :Rating-surprise:: e = BT expectation vs the DECLARED rung rating
                         # (:Anchor-pinned: gauge); agent rating updates online; the outcome
