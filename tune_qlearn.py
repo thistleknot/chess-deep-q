@@ -110,6 +110,8 @@ else:
     if REPLAY_TUNE:
         REGIME += "|replay-temp|v1"
         SPACE += "|replay_t[0.2,3]log"
+    if os.environ.get("QLEARN_DECK"):
+        REGIME += "|deck|v1"
     if os.environ.get("QLEARN_TUNE_SEED"):
         REGIME += "|seed-" + os.environ["QLEARN_TUNE_SEED"].split("/")[-1].replace(".pt", "")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
@@ -180,7 +182,8 @@ def run_trial(p, trial_no):
                       "QLEARN_CONFIRM", "QLEARN_PARGEN", "QLEARN_PARGEN_OPP_D",
                       "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS",
                       "QLEARN_PARGEN_SOFTMAX", "QLEARN_STALE_REHEAT", "QLEARN_TUNE_SEED",
-                      "QLEARN_SURPRISE", "QLEARN_GRPO"):
+                      "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK",
+                      "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:

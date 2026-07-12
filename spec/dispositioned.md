@@ -44,3 +44,7 @@ surprise, spec/relative-reward.spec.md).
 - Merge 14 (rating-surprise + graded, spec/relative-reward.spec.md) — mechanics IMPLEMENTED
   and smoke-passed, arm never run; superseded by Merge 15 (spec/admixture-replay.spec.md)
   which includes its machinery. Archived as an arm 2026-07-12.
+- Merge 15 (admixture replay, spec/admixture-replay.spec.md) — mechanics implemented; its
+  3-trial study COMPLETED (best 892 = proven parms + replay_t 1.0, strongest clean-regime
+  trial to date); arm superseded by Merge 16 full stack (spec/full-stack.spec.md) which
+  includes all its machinery + the magic deck. Archived 2026-07-12.

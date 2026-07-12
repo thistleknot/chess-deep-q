@@ -128,6 +128,15 @@ REPLAY_T = float(os.environ.get("QLEARN_REPLAY_T", "0"))  # Merge 15 :Replay-tem
 # train mostly on the elite games (CEM/self-imitation end), high T ⇒ uniform. A stratified
 # floor keeps one game of each outcome class (W/D/L) present so draws never fully swamp nor
 # vanish (class-balancing instinct). 0 = off. Tuner-searchable (new manifold knob).
+DECK = int(os.environ.get("QLEARN_DECK", "0"))           # Merge 15 :Magic-deck: (operator:
+# "stack the deck of batch samples as we generate more and reshuffle") — a PERSISTENT
+# advantage-ranked buffer of above-average games (cap = this many games; 0 = off). Each
+# chunk's positive-advantage games are added; every cycle all card advantages DECAY
+# (x DECK_DECAY) so stale elites fade as the bar rises — the deck reshuffles itself toward
+# the current frontier. Training augments each chunk with DECK_MIX x chunk-size cards drawn
+# ∝ exp(adv / REPLAY_T or 1).
+DECK_MIX = float(os.environ.get("QLEARN_DECK_MIX", "0.5"))
+DECK_DECAY = float(os.environ.get("QLEARN_DECK_DECAY", "0.9"))
 STALE_REHEAT = float(os.environ.get("QLEARN_STALE_REHEAT", "0"))    # Merge 11 :Stale-reheat::
 # k>0 scales the behavior temperature by (1 + k·stale), capped x4 — the operator's local-
 # minimum rule INSIDE a lane: each informative failure (rejected crown / clearly-below epoch)
@@ -544,6 +553,7 @@ def main():
     cum_games = 0                          # prior training absorbed by the checkpoint (drives schedules)
     resume_bar = -1.0
     agent_elo_r = 600.0                    # :Rating-surprise: online agent rating (anchored gauge)
+    deck = []                              # :Magic-deck: [decaying advantage, game] cards
     # resume from the BEST-visited checkpoint by default (QLEARN_RESUME_BEST=0 for latest): chained
     # runs then RATCHET — each leg starts from the best policy any leg ever reached, so a late collapse
     # in one leg cannot poison the next.
@@ -682,6 +692,22 @@ def main():
                     g = game_data[i]
                     game_data[i] = (g[0], g[1], g[2], g[3], g[4],
                                     max(-1.0, min(1.0, gz[j])) * g[4][0])  # back to White-absolute
+        if DECK > 0 and game_data:
+            # :Magic-deck: — decay, stack, draw, mix
+            for card in deck:
+                card[0] *= DECK_DECAY
+            for g in game_data:
+                a = (g[5] * g[4][0]) if (g[5] is not None and g[4]) else 0.0
+                if a > 0:
+                    deck.append([a, g])
+            deck.sort(key=lambda c: -c[0])
+            del deck[DECK:]
+            n_draw = int(DECK_MIX * len(game_data))
+            if deck and n_draw > 0:
+                t_deck = REPLAY_T if REPLAY_T > 0 else 1.0
+                dw = [math.exp(min(10.0, c[0] / t_deck)) for c in deck]
+                game_data = game_data + [deck[rng.choices(range(len(deck)), weights=dw)[0]][1]
+                                         for _ in range(n_draw)]
         if REPLAY_T > 0 and game_data:
             # :Replay-temperature: — resample the chunk toward its above-average games
             def _adv(g):
