@@ -73,6 +73,8 @@ class RunReq(BaseModel):
 
 
 class TrainReq(BaseModel):
+    # INFRASTRUCTURE defaults below are STANDARDS (operator law): sample 200, batch 20,
+    # patience 4, epoch_elo 24, proxy 4 — change only with operator sign-off, never tune.
     alpha: float = 3e-3
     gamma: float = 0.99
     lam: float = 0.8
@@ -127,6 +129,12 @@ class TrainReq(BaseModel):
     pargen_eps: float = 0.1       # (q) epsilon: state-coverage exploration in native generation
     pargen_threads: int = 12      # (q) native generation worker threads
     pargen_opp_d: int = 1         # (q) frozen-self opponent depth in native generation (0 = random)
+    surprise: bool = False        # (q) Merge 14 :Rating-surprise:: outcome term = Elo surprise
+    grpo: bool = False            # (q) Merge 15 :GRPO-group:: group-whitened advantage
+    replay_t: float = 0.0         # (q) Merge 15 :Replay-temperature:: admixture dial (0 = off)
+    surprise_k: float = 32.0      # (q) Elo K — rating-baseline tracking speed
+    deck: int = 0                 # (q) Merge 16 :Magic-deck: size in games (0 = off; reverted
+                                  # by the M16 study verdict at trial scale — long runs only)
     # --- advanced knobs (API-only; the form doesn't render them, pydantic defaults apply) ---
     algo: str = "q"               # q = Merge 2 Q-learning | ac = Merge 3 online actor-critic
     alpha_theta: float = 1e-4     # (ac) actor step size — slower than critic (two-timescale)
@@ -250,6 +258,11 @@ def api_train_start(cfg: TrainReq):
                QLEARN_PARGEN_EPS=f"{cfg.pargen_eps:.3f}",
                QLEARN_PARGEN_THREADS=str(cfg.pargen_threads),
                QLEARN_PARGEN_OPP_D=str(cfg.pargen_opp_d),
+               QLEARN_SURPRISE="1" if cfg.surprise else "0",
+               QLEARN_GRPO="1" if cfg.grpo else "0",
+               QLEARN_REPLAY_T=f"{cfg.replay_t:.3f}",
+               QLEARN_SURPRISE_K=f"{cfg.surprise_k:.1f}",
+               QLEARN_DECK=str(cfg.deck),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
                QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"
                             f"{cfg.lineage}.pt" if cfg.lineage else
@@ -358,20 +371,20 @@ PAGE = r"""<!doctype html>
       <div><label>λ (trace)</label><input id="lam" type="number" step="0.01" value="0.8"></div>
       <div><label>warmup ratio (τ)</label><input id="warmup" type="number" step="0.01" value="0.4"></div>
       <div><label>warmup ratio (λ)</label><input id="lam_warmup" type="number" step="0.01" value="0.4"></div>
-      <div><label>sample size (games/epoch)</label><input id="epoch_games" type="number" value="1000"></div>
+      <div><label>sample size (games/epoch)</label><input id="epoch_games" type="number" value="200"></div>
       <div><label>max epochs (runs)</label><input id="max_epochs" type="number" value="30"></div>
       <div><label>patience</label><input id="patience" type="number" value="4"></div>
       <div><label>Elo games (final)</label><input id="elo_games" type="number" value="20"></div>
       <div><label>Elo games/epoch (live)</label><input id="epoch_elo" type="number" value="24"></div>
       <div><label>samples / epoch (plot)</label><input id="samples" type="number" value="2" min="1"></div>
       <div><label>buffer (epochs, 0=100k cap)</label><input id="buf_epochs" type="number" step="0.5" value="0" min="0"></div>
-      <div><label>batch size (games)</label><input id="batch_games" type="number" value="200" min="1"></div>
+      <div><label>batch size (games)</label><input id="batch_games" type="number" value="20" min="1"></div>
       <div><label>freeze gen / epoch</label><input id="freeze" type="checkbox" checked style="width:auto"></div>
       <div><label>resume last model</label><input id="resume" type="checkbox" checked style="width:auto"></div>
       <div><label>anchor to best (gate)</label><input id="anchor" type="checkbox" checked style="width:auto"></div>
       <div><label>TDLeaf(λ) search-gen (M5)</label><input id="tdleaf" type="checkbox" checked style="width:auto"></div>
       <div><label>opponents (M5)</label><select id="opp" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="self">self-play</option><option value="graded">graded ladder</option></select></div>
+        <option value="self">self-play</option><option value="graded" selected>graded ladder</option></select></div>
       <div><label>encoding (M6)</label><select id="enc" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
         <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option></select></div>
       <div><label>algo</label><select id="algo" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
@@ -386,10 +399,15 @@ PAGE = r"""<!doctype html>
       <div><label>trivium start "λ,search,outcome"</label><input id="trivium" type="text" value="0.285,0.341,0.374"></div>
       <div><label>trivium end (anneal)</label><input id="trivium_end" type="text" value="0.516,0.341,0.143"></div>
       <div><label>trivium warmup</label><input id="trivium_warmup" type="number" step="0.001" value="0.481"></div>
-      <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" checked style="width:auto"></div>
+      <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" style="width:auto"></div>
       <div><label>pargen threads</label><input id="pargen_threads" type="number" value="12" min="1"></div>
       <div><label>proxy games / sample</label><input id="proxy_games" type="number" value="4" min="0"></div>
-      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="triv"></div>
+      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="grpo"></div>
+      <div><label>Elo surprise (M14)</label><input id="surprise" type="checkbox" checked style="width:auto"></div>
+      <div><label>GRPO group adv (M15)</label><input id="grpo" type="checkbox" checked style="width:auto"></div>
+      <div><label>replay temperature (0=off)</label><input id="replay_t" type="number" step="0.05" value="1.0"></div>
+      <div><label>surprise K (Elo)</label><input id="surprise_k" type="number" step="1" value="32"></div>
+      <div><label>magic deck (games, 0=off)</label><input id="deck" type="number" value="0" min="0"></div>
     </div>
     <div class="row">
       <button class="alt" onclick="loadBest()">⬇ Load Optuna best</button>
@@ -449,6 +467,8 @@ async function loadBest(){
   document.getElementById('warmup').value=j.best.warmup.toFixed(3);
   document.getElementById('lam_warmup').value=(j.best.lambda_warmup!=null?j.best.lambda_warmup:j.best.warmup).toFixed(3);
   if(j.best.batch_games!=null) document.getElementById('batch_games').value=j.best.batch_games;
+  if(j.best.replay_t!=null) document.getElementById('replay_t').value=(+j.best.replay_t).toFixed(2);
+  if(j.best.surprise_k!=null) document.getElementById('surprise_k').value=(+j.best.surprise_k).toFixed(0);
   if(j.best.c_start!=null){
     // :Trivium-anneal: study dims -> env triples "λ,search,outcome"; a = 1 - b - c(t)
     const b=j.best.b_srch, cs=j.best.c_start, ce=j.best.c_end;
@@ -470,7 +490,9 @@ async function startTrain(){
     confirm:document.getElementById('confirm').checked,rsearch_depth:+val('rsearch_depth'),
     rsearch_mod:val('rsearch_mod'),zca:val('zca'),trivium:val('trivium'),trivium_end:val('trivium_end'),
     trivium_warmup:+val('trivium_warmup'),pargen:document.getElementById('pargen').checked?1:0,
-    pargen_threads:+val('pargen_threads'),proxy_games:+val('proxy_games'),lineage:val('lineage')};
+    pargen_threads:+val('pargen_threads'),proxy_games:+val('proxy_games'),lineage:val('lineage'),
+    surprise:document.getElementById('surprise').checked,grpo:document.getElementById('grpo').checked,
+    replay_t:+val('replay_t'),surprise_k:+val('surprise_k'),deck:+val('deck')};
   const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   const j=await r.json();
   document.getElementById('status').textContent=j.ok?`training started (pid ${j.pid})`:('busy: '+j.msg);
