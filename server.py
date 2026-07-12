@@ -210,8 +210,18 @@ def api_optuna_best():
     try:
         import optuna
         storage = "sqlite:///models/qlearn_optuna.db"
-        # study names are FINGERPRINTED by (search space, regime, protocol) so runs resume; serve the
-        # best of the MOST RECENTLY ACTIVE study = the current protocol's study
+        # PINNED study (data/optuna_default.txt = the bake-off WINNER's study name) takes
+        # precedence — "most recently active" is wrong while many parallel studies run.
+        pin = os.path.join(ROOT, "data", "optuna_default.txt")
+        if os.path.exists(pin):
+            name = open(pin).read().strip()
+            if name:
+                st = optuna.load_study(study_name=name, storage=storage)
+                done = [t for t in st.trials if t.value is not None]
+                if done:
+                    return {"ok": True, "best": st.best_params, "elo": round(st.best_value),
+                            "n": len(done), "study": st.study_name}
+        # fallback: best of the MOST RECENTLY ACTIVE study = the current protocol's study
         best_study, best_ts = None, None
         for s in optuna.get_all_study_summaries(storage):
             st = optuna.load_study(study_name=s.study_name, storage=storage)
@@ -407,25 +417,25 @@ PAGE = r"""<!doctype html>
       <div><label>opponents (M5)</label><select id="opp" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
         <option value="self">self-play</option><option value="graded" selected>graded ladder</option></select></div>
       <div><label>encoding (M6)</label><select id="enc" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option></select></div>
+        <option value="pst" selected>pst 769</option><option value="kc">kc features 809</option></select></div>
 
       <div><label>adaptive λ</label><input id="adaptive" type="checkbox" checked style="width:auto"></div>
       <div><label>KC faithful (M7)</label><input id="kc_faithful" type="checkbox" checked style="width:auto"></div>
       <div><label>RAMP filter (M7)</label><input id="ramp" type="checkbox" checked style="width:auto"></div>
       <div><label>confirmed crowns</label><input id="confirm" type="checkbox" checked style="width:auto"></div>
-      <div><label>native search depth (M8, 0=off)</label><input id="rsearch_depth" type="number" value="2" min="0"></div>
+      <div><label>native search depth (M8, 0=off)</label><input id="rsearch_depth" type="number" value="0" min="0"></div>
       <div><label>native module</label><input id="rsearch_mod" type="text" value="rsearch3"></div>
-      <div><label>ZCA (path, empty=off)</label><input id="zca" type="text" value="models/zca.npz"></div>
+      <div><label>ZCA (path, empty=off)</label><input id="zca" type="text" value=""></div>
       <div><label>trivium start "λ,search,outcome"</label><input id="trivium" type="text" value="0.285,0.341,0.374"></div>
       <div><label>trivium end (anneal)</label><input id="trivium_end" type="text" value="0.516,0.341,0.143"></div>
       <div><label>trivium warmup</label><input id="trivium_warmup" type="number" step="0.001" value="0.481"></div>
       <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" style="width:auto"></div>
       <div><label>pargen threads</label><input id="pargen_threads" type="number" value="12" min="1"></div>
       <div><label>proxy games / sample</label><input id="proxy_games" type="number" value="4" min="0"></div>
-      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="grpo"></div>
-      <div><label>Elo surprise (M14)</label><input id="surprise" type="checkbox" checked style="width:auto"></div>
-      <div><label>GRPO group adv (M15)</label><input id="grpo" type="checkbox" checked style="width:auto"></div>
-      <div><label>replay temperature (0=off)</label><input id="replay_t" type="number" step="0.05" value="1.0"></div>
+      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="p7"></div>
+      <div><label>Elo surprise (M14)</label><input id="surprise" type="checkbox" style="width:auto"></div>
+      <div><label>GRPO group adv (M15)</label><input id="grpo" type="checkbox" style="width:auto"></div>
+      <div><label>replay temperature (0=off)</label><input id="replay_t" type="number" step="0.05" value="0"></div>
       <div><label>surprise K (Elo)</label><input id="surprise_k" type="number" step="1" value="32"></div>
       <div><label>magic deck (games, 0=off)</label><input id="deck" type="number" value="0" min="0"></div>
     </div>
@@ -486,6 +496,8 @@ async function loadBest(){
   document.getElementById('lam').value=j.best.lambda.toFixed(3);
   document.getElementById('warmup').value=j.best.warmup.toFixed(3);
   document.getElementById('lam_warmup').value=(j.best.lambda_warmup!=null?j.best.lambda_warmup:j.best.warmup).toFixed(3);
+  const tf=document.getElementById('tau_floor');   // no form field today -> TrainReq default 0.05
+  if(tf&&j.best.tau_floor!=null) tf.value=(+j.best.tau_floor).toFixed(3);
   if(j.best.batch_games!=null) document.getElementById('batch_games').value=j.best.batch_games;
   if(j.best.replay_t!=null) document.getElementById('replay_t').value=(+j.best.replay_t).toFixed(2);
   if(j.best.surprise_k!=null) document.getElementById('surprise_k').value=(+j.best.surprise_k).toFixed(0);
