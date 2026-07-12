@@ -79,10 +79,15 @@ BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # softmax = 1-ply
 SEARCH_W   = int(os.environ.get("QLEARN_SEARCH_WIDTH", "8"))   # top-K root moves get reply expansion
 SEARCH_D   = int(os.environ.get("QLEARN_SEARCH_DEPTH", "2"))   # search depth for behavior/measure (2|3)
 ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 planes | kc = Merge 6
-# KnightCap-donor features (spec/eval-features.spec.md :Phase-B:, 809-dim). Changes the input
-# manifold -> part of every checkpoint and study identity.
-ENC_FN     = encode_features if ENC == "kc" else encode
-NIN_ENC    = NFEAT if ENC == "kc" else NIN
+# KnightCap-donor features (809) | nk = :Features-5k: -> :Kanerva: (kanerva_enc.py, 512-dim
+# overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
+# -> part of every checkpoint and study identity. nk is python-only: no native searcher eval
+# (set QLEARN_RSEARCH_DEPTH=0, PARGEN=0; TDLeaf targets come from the python beam search).
+if ENC == "nk":
+    from kanerva_enc import encode_kanerva as ENC_FN, K_OUT as NIN_ENC
+else:
+    ENC_FN     = encode_features if ENC == "kc" else encode
+    NIN_ENC    = NFEAT if ENC == "kc" else NIN
 ZCA        = os.environ.get("QLEARN_ZCA", "")                  # E3 (purist capacity #1): path to
 # models/zca.npz -> train in the WHITENED space x' = Z(x - mu) (conditioning only, no capacity
 # change); native searcher gets back-converted raw weights (w_raw = Z w', b_raw = b' - w_raw·mu).
@@ -90,6 +95,8 @@ _ZCA_Z = _ZCA_MU = None
 if ZCA:
     _z = np.load(ZCA)
     _ZCA_Z, _ZCA_MU = _z["Z"].astype(np.float32), _z["mu"].astype(np.float32)
+    NIN_ENC = _ZCA_Z.shape[0]              # :PCA-reduce:: k x 809 whitened-PCA transform
+    # reduces the input manifold to k components (square 809 = plain ZCA, unchanged)
     _base_enc = ENC_FN
     def ENC_FN(board, _e=_base_enc):                           # noqa: F811 — deliberate wrap
         return _ZCA_Z @ (_e(board) - _ZCA_MU)
@@ -241,8 +248,8 @@ class QAgent:
         w = self.net.head.weight.detach().cpu().reshape(-1).double().numpy()
         b = float(self.net.head.bias.detach().cpu().reshape(-1)[0])
         if _ZCA_Z is not None:
-            w_raw = _ZCA_Z.astype(np.float64) @ w
-            return list(w_raw), b - float(w_raw @ _ZCA_MU.astype(np.float64))
+            w_raw = _ZCA_Z.astype(np.float64).T @ w    # W^T: exact for square ZCA (symmetric)
+            return list(w_raw), b - float(w_raw @ _ZCA_MU.astype(np.float64))  # and PCA (k x 809)
         return list(w), b
 
     def sync_rsearch(self):
@@ -495,6 +502,8 @@ def evaluate_greedy(agent, games):
     exploratory softmax self-play. Returns (wr_random, wr_heuristic, avg_material, avg_turns): greedy win-rates
     vs a random mover and vs the 1-ply PST heuristic, plus the agent's average final material margin (nominal
     pawns, agent − opponent) and average game length (full moves) in the vs-heuristic games."""
+    if games <= 0:
+        return 0.0, 0.0, 0.0, 0.0              # diagnostics disabled (smokes, PROXY_GAMES=0)
     def run(opp, track):
         s, tot_mat, tot_plies = 0.0, 0.0, 0
         for g in range(games):
