@@ -107,6 +107,27 @@ PARGEN_SOFTMAX = int(os.environ.get("QLEARN_PARGEN_SOFTMAX", "0"))  # Merge 11 :
 # optimism-directed exploration (inflated init values attract visits until deflated); pairs
 # with the optimistic zero seed. Set eps=0 when on (τ subsumes uniform exploration).
 # Requires rsearch module ≥ v3.6 (play_games tau kwarg).
+SURPRISE = int(os.environ.get("QLEARN_SURPRISE", "0"))  # Merge 14 :Rating-surprise:
+# (spec/relative-reward.spec.md): the trivium's OUTCOME term uses z_rel = 2·(s − E[s|ratings])
+# instead of raw z on GRADED games — a draw vs a stronger rung pays positive surprise, so
+# non-terminating games carry signal. E from Bradley-Terry over declared rung ratings with
+# the SF@1320 anchor pinning the gauge (:Anchor-pinned:); the agent's own rating updates
+# online (Elo K). Mirror self-play keeps raw z (:No-self-reference: — symmetry ⇒ e=0.5).
+SURPRISE_K = 32.0                                        # standard Elo K (declared constant)
+GRPO = int(os.environ.get("QLEARN_GRPO", "0"))           # Merge 14 :GRPO-group: — "GRPO and
+# Elo, nothing fancier" (operator): per-chunk GROUP z-normalization of the agent-relative
+# Elo-surprise scores, replicating RL_v2/ac_trainer._whiten_group (our own donor code;
+# std<1e-8 -> all zeros, the zero-variance convention). The whitened group advantage
+# REPLACES z_out in the trivium's outcome term — above-average trajectories in each group
+# get positive weight. Graded games only; mirror self-play stays raw (:No-self-reference:).
+RUNG_ELO = {"random": 400.0, "heuristic": 800.0, "sf-skill0": 1000.0, "sf-skill2": 1100.0,
+            "sf-skill5": 1200.0, "sf-skill10": 1280.0, "sf-1320": 1320.0}  # declared constants
+REPLAY_T = float(os.environ.get("QLEARN_REPLAY_T", "0"))  # Merge 15 :Replay-temperature: —
+# admixtures of better batches (operator design): after :GRPO-group: scores the chunk, the
+# chunk is RESAMPLED (with replacement, same size) with weights exp(advantage / T): low T ⇒
+# train mostly on the elite games (CEM/self-imitation end), high T ⇒ uniform. A stratified
+# floor keeps one game of each outcome class (W/D/L) present so draws never fully swamp nor
+# vanish (class-balancing instinct). 0 = off. Tuner-searchable (new manifold knob).
 STALE_REHEAT = float(os.environ.get("QLEARN_STALE_REHEAT", "0"))    # Merge 11 :Stale-reheat::
 # k>0 scales the behavior temperature by (1 + k·stale), capped x4 — the operator's local-
 # minimum rule INSIDE a lane: each informative failure (rejected crown / clearly-below epoch)
@@ -387,7 +408,7 @@ def play_game(agent, tau, rng, env, opp_move=None, agent_white=True):
     return xs, gvs, z, predicted, signs
 
 
-def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None):
+def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=None):
     """λ-return targets for each visited afterstate. Reward is 0 until the terminal (White-absolute z);
     the bootstrap for step k is the GREEDY value at position k+1 (off-policy max), 0 at the terminal step.
     `lam` is the (possibly variance-adapted) eligibility-trace λ for this epoch.
@@ -401,6 +422,9 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None):
         return [], []
     if triv is None:
         triv = _TRIV
+    zc = z if z_out is None else z_out       # :Rating-surprise:: outcome COMPONENT only —
+    # the λ-return's terminal reward stays raw z (game truth); the trivium's c-term anchors
+    # on the peer-relative surprise when provided.
     if not (RAMP and TDLEAF) or predicted is None:
         rewards = [0.0] * T
         rewards[-1] = z
@@ -410,7 +434,7 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None):
         G = lambda_return(rewards, boot, dones, lam, gamma=GAMMA)
         if triv is not None:
             a, b, c = triv
-            G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
+            G = [a * G[k] + b * gvs[k] + c * zc for k in range(T)]
         return xs, G
     deltas = [0.0] * T
     for k in range(T):
@@ -426,7 +450,7 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None):
         G[k] = gvs[k] + acc
     if triv is not None:                                       # compound target (operator trivium):
         a, b, c = triv                                         # λ-return : search value : outcome
-        G = [a * G[k] + b * gvs[k] + c * z for k in range(T)]
+        G = [a * G[k] + b * gvs[k] + c * zc for k in range(T)]
     return xs, G
 
 
@@ -519,6 +543,7 @@ def main():
            else torch.optim.Adam(agent.net.parameters(), lr=ALPHA))
     cum_games = 0                          # prior training absorbed by the checkpoint (drives schedules)
     resume_bar = -1.0
+    agent_elo_r = 600.0                    # :Rating-surprise: online agent rating (anchored gauge)
     # resume from the BEST-visited checkpoint by default (QLEARN_RESUME_BEST=0 for latest): chained
     # runs then RATCHET — each leg starts from the best policy any leg ever reached, so a late collapse
     # in one leg cannot poison the next.
@@ -541,6 +566,7 @@ def main():
                     pass                   # optimizer format drift -> fresh Adam moments, weights kept
             cum_games = int(ck.get("cum_games", 0))
             resume_bar = float(ck.get("strength", -1.0))   # persist the acceptance bar across legs
+            agent_elo_r = float(ck.get("rating", 600.0))   # :Rating-surprise: rating rides the ckpt
             print(f"RESUMED {ckpt_path} (+{cum_games} prior games, bar {resume_bar:.2f})", flush=True)
         else:
             print(f"resume requested but arch mismatch ({ck.get('arch')} != {ARCH}) -> fresh net", flush=True)
@@ -615,7 +641,7 @@ def main():
                 game_data.append(([ENC_FN(chess.Board(f)) for f, _v, _p in recs],
                                   [v for _f, v, _p in recs], z,
                                   [p for _f, _v, p in recs],
-                                  [1.0 if aw else -1.0] * len(recs)))
+                                  [1.0 if aw else -1.0] * len(recs), None))
         else:
             for _ in range(chunk):
                 tau = tau_at(games_played, total_games, cum_games)
@@ -625,21 +651,59 @@ def main():
                     aw = (games_played % 2 == 0)               # alternate colors vs the ladder
                     reach = (OPP_REACH > 0 and ladder.i < len(ladder.rungs) - 1
                              and rng.random() < OPP_REACH)     # spec :Opponent-diet:
-                    opp_fn = ladder.rungs[ladder.i + 1][1] if reach else ladder.move_fn()
+                    rung_i = ladder.i + 1 if reach else ladder.i
+                    opp_fn = ladder.rungs[rung_i][1]
                     xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env, opp_fn, aw)
+                    s = 0.5 if z == 0.0 else (1.0 if (z > 0) == aw else 0.0)
                     if not reach:                              # window = rung-MATCHED games only
-                        ladder.report(0.5 if z == 0.0 else (1.0 if (z > 0) == aw else 0.0))
+                        ladder.report(s)
+                    z_out = None
+                    if SURPRISE:
+                        # :Rating-surprise:: e = BT expectation vs the DECLARED rung rating
+                        # (:Anchor-pinned: gauge); agent rating updates online; the outcome
+                        # component becomes the clipped surprise, White-absolute.
+                        r_opp = RUNG_ELO.get(ladder.rungs[rung_i][0], 800.0)
+                        e_exp = 1.0 / (1.0 + 10.0 ** ((r_opp - agent_elo_r) / 400.0))
+                        agent_elo_r += SURPRISE_K * (s - e_exp)
+                        z_out = max(-1.0, min(1.0, 2.0 * (s - e_exp))) * (1.0 if aw else -1.0)
                 else:
                     xs, gvs, z, pred_f, sgn = play_game(gen, tau, rng, env)
-                game_data.append((xs, gvs, z, pred_f, sgn))
+                    z_out = None                               # :No-self-reference: mirror keeps raw z
+                game_data.append((xs, gvs, z, pred_f, sgn, z_out))
+        if GRPO:
+            # :GRPO-group: over this chunk's graded games — whiten, clip, nothing fancier
+            idx = [i for i, g in enumerate(game_data) if g[5] is not None and g[4]]
+            if idx:
+                sc = [game_data[i][5] * game_data[i][4][0] for i in idx]   # agent-relative
+                gm = sum(sc) / len(sc)
+                gstd = (sum((x - gm) ** 2 for x in sc) / len(sc)) ** 0.5
+                gz = [0.0] * len(sc) if gstd < 1e-8 else [(x - gm) / gstd for x in sc]
+                for j, i in enumerate(idx):
+                    g = game_data[i]
+                    game_data[i] = (g[0], g[1], g[2], g[3], g[4],
+                                    max(-1.0, min(1.0, gz[j])) * g[4][0])  # back to White-absolute
+        if REPLAY_T > 0 and game_data:
+            # :Replay-temperature: — resample the chunk toward its above-average games
+            def _adv(g):
+                return (g[5] * g[4][0]) if (g[5] is not None and g[4]) else 0.0
+            def _cls(g):                                       # outcome class for the floor
+                return 0 if g[2] == 0.0 else (1 if g[2] > 0 else -1)
+            ws = [math.exp(min(10.0, _adv(g) / REPLAY_T)) for g in game_data]
+            tot_w = sum(ws)
+            picks = [game_data[rng.choices(range(len(game_data)), weights=ws)[0]]
+                     for _ in range(len(game_data))] if tot_w > 0 else list(game_data)
+            for c in {_cls(g) for g in game_data}:             # stratified floor: keep every class
+                if not any(_cls(g) == c for g in picks):
+                    picks[rng.randrange(len(picks))] = next(g for g in game_data if _cls(g) == c)
+            game_data = picks
         triv_now = _TRIV
         if _TRIV is not None and _TRIV_END is not None:        # :Trivium-anneal:
             _f = math.exp(-((cum_games + games_played) / max(1, cum_games + total_games))
                           / max(TRIV_WARMUP, 1e-6))
             triv_now = tuple(e + (s - e) * _f for s, e in zip(_TRIV, _TRIV_END))
-        for xs, gvs, z, pred_f, sgn in game_data:
+        for xs, gvs, z, pred_f, sgn, z_out in game_data:
             zs_log.append(z)
-            xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now)
+            xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out)
             for x, g in zip(xt, G):
                 new_pairs.append((x, g))
                 if not KC_FAITHFUL:
@@ -764,7 +828,7 @@ def main():
                 # KEEP-BEST: RL curves are non-monotone (policy->data feedback); keep the best VISITED
                 torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                             "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
-                            "strength": strength, "ts": int(time.time())},
+                            "strength": strength, "rating": agent_elo_r, "ts": int(time.time())},
                            CKPT.replace(".pt", "_best.pt"))
                 if challenged:
                     # :Crown-rung:: every KEPT crown feeds the ladder from its pooled SF games —
@@ -829,7 +893,7 @@ def main():
     os.makedirs("models", exist_ok=True)
     torch.save({"state_dict": agent.net.state_dict(), "arch": ARCH, "enc": ENC, "zca": bool(ZCA),
                 "opt_state": opt.state_dict(), "cum_games": cum_games + games_played,
-                "ts": int(time.time())}, CKPT)
+                "rating": agent_elo_r, "ts": int(time.time())}, CKPT)
 
     result = {"tag": TAG, "seed": SEED, "epoch_games": epoch_games, "epochs_run": epochs_run,
               "resumed": RESUME, "cum_games": cum_games + games_played,

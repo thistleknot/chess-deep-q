@@ -33,3 +33,14 @@ Everything below lives in `spec/archive/` with its disposition.
 `terminal-interface` `training-loop` `value-target` — the exploratory era that the
 replicate-first pivot ended. `nnue-eval` may be revived by the queued capacity arm
 (Merge 10 / purist representation queue).
+
+## Archived UNTESTED (operator call, 2026-07-12 — all effort to Merge 14)
+- Merge 10 (incremental eval / efficiency) — spec'd in LESSONS #21 context, never built.
+- Merge 12 (policy head, spec/policy-head.spec.md) — spec committed, demoted by council
+  round #7 (no linear-capacity precedent), never implemented.
+- Merge 13 (Giraffe-lineage MLP capacity) — council-ordered, never implemented.
+These remain re-openable; specs/ledger entries preserved. Active line: Merge 14 (GRPO + Elo
+surprise, spec/relative-reward.spec.md).
+- Merge 14 (rating-surprise + graded, spec/relative-reward.spec.md) — mechanics IMPLEMENTED
+  and smoke-passed, arm never run; superseded by Merge 15 (spec/admixture-replay.spec.md)
+  which includes its machinery. Archived as an arm 2026-07-12.

@@ -37,6 +37,8 @@ ARCH        = sys.argv[6] if len(sys.argv) > 6 else "linear"   # linear | mlp �
 HIDDEN      = int(sys.argv[7]) if len(sys.argv) > 7 else 64    # mlp hidden width — part of the identity
 ALGO        = sys.argv[8] if len(sys.argv) > 8 else "q"        # q | ac — selects trainer + manifold
 assert BATCH_GAMES <= EPOCH_GAMES, "batch size (games) must be <= sample size (games/epoch)"
+REPLAY_TUNE = os.environ.get("QLEARN_REPLAY_TUNE", "0") == "1"  # Merge 15 :Replay-temperature:
+# dim (replay_t, log): the admixture dial — new manifold knob, searched not hand-picked.
 TRIV_TUNE = os.environ.get("QLEARN_TRIV_TUNE", "0") == "1"    # :Trivium-anneal: dims (c_start,
 # c_end, b_srch, triv_warmup); a = 1-b-c(t). Search-space change -> new fingerprint.
 ZCA_ENV  = os.environ.get("QLEARN_ZCA", "")                   # whitened training (E3 treatment);
@@ -60,6 +62,10 @@ _ELO = re.compile(r"KILL-CHECK\s+elo\s+(-?[0-9.]+)")
 # grounded priors: (mean) for TPE enqueue; ranges in objective()
 PRIOR = {"decay": 0.99, "alpha": 3e-3, "lambda": 0.8, "warmup": 0.4, "lambda_warmup": 0.8,
          "tau_floor": 0.05}
+if TRIV_TUNE:
+    PRIOR = dict(PRIOR, c_start=0.374, c_end=0.143, b_srch=0.341, triv_warmup=0.481)
+if REPLAY_TUNE:
+    PRIOR = dict(PRIOR, replay_t=1.0)
 if TDLEAF:
     # S&B §9.6 rule of thumb (skill 086_step-size): α ≈ 1/(τ·E[||x||²]) ≈ 1/(100 experiences ·
     # ~33 active features) ≈ 3e-4 — and measured: α=3e-3 (trial 0, self-play arm) still damaged
@@ -95,6 +101,17 @@ else:
         REGIME += "|zca|v1"
     if PARGEN_ENV:
         REGIME += "|pargen|v1"
+    if os.environ.get("QLEARN_PARGEN_SOFTMAX") == "1":
+        REGIME += "|softmax-tau|v1"
+    if os.environ.get("QLEARN_SURPRISE") == "1":
+        REGIME += "|surprise|v1"
+    if os.environ.get("QLEARN_GRPO") == "1":
+        REGIME += "|grpo|v1"
+    if REPLAY_TUNE:
+        REGIME += "|replay-temp|v1"
+        SPACE += "|replay_t[0.2,3]log"
+    if os.environ.get("QLEARN_TUNE_SEED"):
+        REGIME += "|seed-" + os.environ["QLEARN_TUNE_SEED"].split("/")[-1].replace(".pt", "")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
 BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # (q) behavior policy — study identity
 CURRICULUM = os.environ.get("QLEARN_CURRICULUM", "0")          # exploring-starts fraction (passthrough
@@ -150,6 +167,7 @@ def run_trial(p, trial_no):
                 ck = ck.replace(".pt", f"_{ENC}.pt")
                 seed = ("models/qlearn_wseed.pt" if ZCA_ENV
                         else TDLEAF_SEED.replace(".pt", f"_{ENC}.pt"))
+            seed = os.environ.get("QLEARN_TUNE_SEED", seed)   # :Provenance: clean-seed override
             env["QLEARN_CKPT"] = ck
             shutil.copyfile(seed, ck)
             shutil.copyfile(seed, ck.replace(".pt", "_best.pt"))
@@ -160,9 +178,13 @@ def run_trial(p, trial_no):
             for k in ("QLEARN_ZCA", "QLEARN_RSEARCH_DEPTH", "QLEARN_RSEARCH_MOD",
                       "QLEARN_KC_FAITHFUL", "QLEARN_RAMP", "QLEARN_OPP_REACH",
                       "QLEARN_CONFIRM", "QLEARN_PARGEN", "QLEARN_PARGEN_OPP_D",
-                      "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS"):
+                      "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS",
+                      "QLEARN_PARGEN_SOFTMAX", "QLEARN_STALE_REHEAT", "QLEARN_TUNE_SEED",
+                      "QLEARN_SURPRISE", "QLEARN_GRPO"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
+            if REPLAY_TUNE:
+                env["QLEARN_REPLAY_T"] = f"{p['replay_t']:.3f}"
             if TRIV_TUNE:
                 a_s = 1.0 - p["b_srch"] - p["c_start"]
                 a_e = 1.0 - p["b_srch"] - p["c_end"]
@@ -194,6 +216,8 @@ def objective(trial):
             "lambda_warmup": trial.suggest_float("lambda_warmup", 0.10, 1.20),
             "tau_floor": trial.suggest_float("tau_floor", 0.03, 0.25),
         }
+        if REPLAY_TUNE:
+            p["replay_t"] = trial.suggest_float("replay_t", 0.2, 3.0, log=True)
         if TRIV_TUNE:
             p["c_start"] = trial.suggest_float("c_start", 0.1, 0.6)
             p["c_end"] = trial.suggest_float("c_end", 0.0, 0.2)
