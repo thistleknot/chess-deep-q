@@ -17,6 +17,7 @@ LIVE plots (loss, points/material, turns/length, strength) polled from the train
 import os
 import sys
 import json
+import math
 import subprocess
 
 from fastapi import FastAPI
@@ -149,6 +150,19 @@ class TrainReq(BaseModel):
     train_steps: int = 200
 
 
+def _sanitize(o):
+    """NaN/Infinity -> None: trainer rows may carry non-finite floats (e.g. a degenerate
+    epoch statistic); FastAPI's JSON encoder rejects them (allow_nan=False), which took the
+    whole console down. Sanitize at the READ boundary so one bad row can never do that."""
+    if isinstance(o, float) and not math.isfinite(o):
+        return None
+    if isinstance(o, dict):
+        return {k: _sanitize(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_sanitize(v) for v in o]
+    return o
+
+
 def _read_jsonl(path):
     if not os.path.exists(path):
         return []
@@ -157,7 +171,7 @@ def _read_jsonl(path):
         line = line.strip()
         if line:
             try:
-                rows.append(json.loads(line))
+                rows.append(_sanitize(json.loads(line)))
             except json.JSONDecodeError:
                 pass   # tolerate a half-written last line during a live run
     return rows
