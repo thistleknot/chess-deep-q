@@ -341,6 +341,13 @@ def api_train_metrics():
             "run_start": run_start}
 
 
+@app.get("/compare", response_class=HTMLResponse)
+def compare():
+    """Elo-per-feature-set comparison (rebuilt on every request from ledger + live logs)."""
+    import plot_arms
+    return plot_arms.build()
+
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     return PAGE
@@ -373,7 +380,7 @@ PAGE = r"""<!doctype html>
   table.lad td{padding:4px 8px;border-bottom:1px solid #21262d;color:#e6edf3;}
   table.lad tr.best td{color:#3fb950;font-weight:600;}
 </style></head><body>
-  <h1>chess RL — training console</h1>
+  <h1>chess RL — training console <a href='/compare' style='font-size:12px;color:#58a6ff;margin-left:10px'>Elo per feature set →</a></h1>
   <p class="sub">DDQN · trivium targets · Elo-surprise · GRPO advantage · graded ladder · ZCA(self) features · anchor SF@1320<br>
     <b>all live scores are the GREEDY (optimal) policy</b> · cheap metrics land every BATCH (faint = raw, bold = MA-10) · evals per samples/epoch · resets each run<br>
     τ &amp; λ share one asymptotic anneal (fast-then-slow, never reaches the endpoint — exploration room never closes)</p>
