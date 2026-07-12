@@ -153,7 +153,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rsearch"
+name = "rsearch4"
 version = "0.1.0"
 dependencies = [
  "cozy-chess",
