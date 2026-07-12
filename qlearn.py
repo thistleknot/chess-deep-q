@@ -113,7 +113,8 @@ SURPRISE = int(os.environ.get("QLEARN_SURPRISE", "0"))  # Merge 14 :Rating-surpr
 # non-terminating games carry signal. E from Bradley-Terry over declared rung ratings with
 # the SF@1320 anchor pinning the gauge (:Anchor-pinned:); the agent's own rating updates
 # online (Elo K). Mirror self-play keeps raw z (:No-self-reference: — symmetry ⇒ e=0.5).
-SURPRISE_K = 32.0                                        # standard Elo K (declared constant)
+SURPRISE_K = float(os.environ.get("QLEARN_SURPRISE_K", "32"))  # Elo K: how fast the
+# rating baseline tracks the agent — an algorithmic knob, Optuna-searchable (was constant).
 GRPO = int(os.environ.get("QLEARN_GRPO", "0"))           # Merge 14 :GRPO-group: — "GRPO and
 # Elo, nothing fancier" (operator): per-chunk GROUP z-normalization of the agent-relative
 # Elo-surprise scores, replicating RL_v2/ac_trainer._whiten_group (our own donor code;
@@ -128,6 +129,12 @@ REPLAY_T = float(os.environ.get("QLEARN_REPLAY_T", "0"))  # Merge 15 :Replay-tem
 # train mostly on the elite games (CEM/self-imitation end), high T ⇒ uniform. A stratified
 # floor keeps one game of each outcome class (W/D/L) present so draws never fully swamp nor
 # vanish (class-balancing instinct). 0 = off. Tuner-searchable (new manifold knob).
+DDQN = int(os.environ.get("QLEARN_DDQN", "0"))           # :Double-DQN: (van Hasselt) —
+# decouple SELECTION from EVALUATION, the canonical maximization-bias cure (same defect
+# class as :Backed-bootstrap:/:Confirmed-crown:/RAMP): the frozen generator's search still
+# SELECTS the line (PV leaf), but the λ-return BOOTSTRAP evaluates that leaf with the LIVE
+# net at training time. The trivium's b-term keeps the frozen SEARCH value (unchanged) —
+# only the bootstrap chain is cross-evaluated.
 DECK = int(os.environ.get("QLEARN_DECK", "0"))           # Merge 15 :Magic-deck: (operator:
 # "stack the deck of batch samples as we generate more and reshuffle") — a PERSISTENT
 # advantage-ranked buffer of above-average games (cap = this many games; 0 = off). Each
@@ -729,7 +736,20 @@ def main():
             triv_now = tuple(e + (s - e) * _f for s, e in zip(_TRIV, _TRIV_END))
         for xs, gvs, z, pred_f, sgn, z_out in game_data:
             zs_log.append(z)
-            xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out)
+            boot_gvs = gvs
+            if DDQN and xs:
+                # :Double-DQN:: live-net evaluation of the frozen-selected leaves for the
+                # bootstrap ONLY; gvs (frozen search values) still feed the trivium b-term.
+                with torch.no_grad():
+                    lv = agent.net(torch.from_numpy(np.stack(xs)).to(dev)).cpu().numpy().reshape(-1)
+                boot_gvs = lv.tolist()
+                xt, G = build_targets(xs, boot_gvs, z, lam_eff, pred_f, sgn, None, z_out)
+                if triv_now is not None:
+                    a_t, b_t, c_t = triv_now
+                    zc = z if z_out is None else z_out
+                    G = [a_t * G[k] + b_t * gvs[k] + c_t * zc for k in range(len(G))]
+            else:
+                xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out)
             for x, g in zip(xt, G):
                 new_pairs.append((x, g))
                 if not KC_FAITHFUL:

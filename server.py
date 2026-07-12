@@ -360,7 +360,7 @@ PAGE = r"""<!doctype html>
   table.lad tr.best td{color:#3fb950;font-weight:600;}
 </style></head><body>
   <h1>chess RL — training console</h1>
-  <p class="sub">Merge 2 Q-learning · TD(λ)+variance-adaptive λ · softmax-τ self-play · anchor SF@1320<br>
+  <p class="sub">DDQN · trivium targets · Elo-surprise · GRPO advantage · graded ladder · ZCA(self) features · anchor SF@1320<br>
     <b>all live scores are the GREEDY (optimal) policy</b> · cheap metrics land every BATCH (faint = raw, bold = MA-10) · evals per samples/epoch · resets each run<br>
     τ &amp; λ share one asymptotic anneal (fast-then-slow, never reaches the endpoint — exploration room never closes)</p>
 
@@ -387,8 +387,7 @@ PAGE = r"""<!doctype html>
         <option value="self">self-play</option><option value="graded" selected>graded ladder</option></select></div>
       <div><label>encoding (M6)</label><select id="enc" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
         <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option></select></div>
-      <div><label>algo</label><select id="algo" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="q">q-learn (M2)</option><option value="ac">actor-critic (M3)</option></select></div>
+
       <div><label>adaptive λ</label><input id="adaptive" type="checkbox" checked style="width:auto"></div>
       <div><label>KC faithful (M7)</label><input id="kc_faithful" type="checkbox" checked style="width:auto"></div>
       <div><label>RAMP filter (M7)</label><input id="ramp" type="checkbox" checked style="width:auto"></div>
@@ -483,7 +482,7 @@ async function startTrain(){
     epoch_games:+val('epoch_games'),max_epochs:+val('max_epochs'),patience:+val('patience'),
     elo_games:+val('elo_games'),epoch_elo_games:+val('epoch_elo'),samples_per_epoch:+val('samples'),buffer_epochs:+val('buf_epochs'),
     batch_games:+val('batch_games'),freeze_epoch:document.getElementById('freeze').checked,
-    resume:document.getElementById('resume').checked,algo:val('algo'),anchor:document.getElementById('anchor').checked,
+    resume:document.getElementById('resume').checked,algo:'q',anchor:document.getElementById('anchor').checked,
     adaptive_lambda:document.getElementById('adaptive').checked,tdleaf:document.getElementById('tdleaf').checked,
     opp:val('opp'),enc:val('enc'),
     kc_faithful:document.getElementById('kc_faithful').checked,ramp:document.getElementById('ramp').checked,

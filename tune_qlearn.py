@@ -65,7 +65,7 @@ PRIOR = {"decay": 0.99, "alpha": 3e-3, "lambda": 0.8, "warmup": 0.4, "lambda_war
 if TRIV_TUNE:
     PRIOR = dict(PRIOR, c_start=0.374, c_end=0.143, b_srch=0.341, triv_warmup=0.481)
 if REPLAY_TUNE:
-    PRIOR = dict(PRIOR, replay_t=1.0)
+    PRIOR = dict(PRIOR, replay_t=1.0, surprise_k=32.0)
 if TDLEAF:
     # S&B §9.6 rule of thumb (skill 086_step-size): α ≈ 1/(τ·E[||x||²]) ≈ 1/(100 experiences ·
     # ~33 active features) ≈ 3e-4 — and measured: α=3e-3 (trial 0, self-play arm) still damaged
@@ -107,9 +107,11 @@ else:
         REGIME += "|surprise|v1"
     if os.environ.get("QLEARN_GRPO") == "1":
         REGIME += "|grpo|v1"
+    if os.environ.get("QLEARN_DDQN") == "1":
+        REGIME += "|ddqn|v1"
     if REPLAY_TUNE:
-        REGIME += "|replay-temp|v1"
-        SPACE += "|replay_t[0.2,3]log"
+        REGIME += "|replay-temp|v2"                       # v2: widened + surprise_k dim
+        SPACE += "|replay_t[0.1,5]log|surprise_k[8,64]log"
     if os.environ.get("QLEARN_DECK"):
         REGIME += "|deck|v1"
     if os.environ.get("QLEARN_TUNE_SEED"):
@@ -182,12 +184,13 @@ def run_trial(p, trial_no):
                       "QLEARN_CONFIRM", "QLEARN_PARGEN", "QLEARN_PARGEN_OPP_D",
                       "QLEARN_PARGEN_EPS", "QLEARN_PARGEN_THREADS",
                       "QLEARN_PARGEN_SOFTMAX", "QLEARN_STALE_REHEAT", "QLEARN_TUNE_SEED",
-                      "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK",
+                      "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK", "QLEARN_DDQN",
                       "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:
                 env["QLEARN_REPLAY_T"] = f"{p['replay_t']:.3f}"
+                env["QLEARN_SURPRISE_K"] = f"{p['surprise_k']:.1f}"
             if TRIV_TUNE:
                 a_s = 1.0 - p["b_srch"] - p["c_start"]
                 a_e = 1.0 - p["b_srch"] - p["c_end"]
@@ -220,7 +223,8 @@ def objective(trial):
             "tau_floor": trial.suggest_float("tau_floor", 0.03, 0.25),
         }
         if REPLAY_TUNE:
-            p["replay_t"] = trial.suggest_float("replay_t", 0.2, 3.0, log=True)
+            p["replay_t"] = trial.suggest_float("replay_t", 0.1, 5.0, log=True)
+            p["surprise_k"] = trial.suggest_float("surprise_k", 8.0, 64.0, log=True)
         if TRIV_TUNE:
             p["c_start"] = trial.suggest_float("c_start", 0.1, 0.6)
             p["c_end"] = trial.suggest_float("c_end", 0.0, 0.2)
