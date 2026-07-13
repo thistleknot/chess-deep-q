@@ -74,6 +74,8 @@ BUFFER_EPOCHS = float(os.environ.get("QLEARN_BUFFER_EPOCHS", "0"))  # >0: cap th
 TRAIN_STEPS= int(os.environ.get("QLEARN_TRAIN_STEPS", "200"))  # SGD minibatches per iteration
 ARCH       = os.environ.get("QLEARN_ARCH", "linear")
 HIDDEN     = int(os.environ.get("QLEARN_HIDDEN", "64"))        # mlp hidden width (capacity rung)
+CRELU      = os.environ.get("QLEARN_CRELU", "0") == "1"        # Merge 20: clipped ReLU (clamp 0..1)
+# on the mlp hidden layer — the NNUE-recipe activation (capacity re-audit; inert for arch=linear)
 PLY_CAP    = int(os.environ.get("QLEARN_PLY_CAP", "160"))
 ELO_GAMES  = int(os.environ.get("QLEARN_ELO_GAMES", "20"))
 PROXY_GAMES= int(os.environ.get("QLEARN_PROXY_GAMES", "20"))
@@ -111,6 +113,18 @@ elif ENC == "k8":
     from kanerva_enc import K8_OUT as NIN_ENC
     def ENC_FN(board, _k=_k8, _e=encode_features):    # :Kanerva-809: expansion (bake set 5)
         return _k(_e(board))
+elif ENC == "kpst":
+    NIN_ENC = 4 * NIN                      # Merge 20 :Kpst:: the pst-769 planes replicated per
+    # WHITE-king quadrant bucket (2x2: file-half x rank-half) — hand-declared king-conditioned
+    # feature def (NNUE-floor probe: 4 buckets is the practice floor; own-king only, black-king
+    # structure deliberately unmodeled at this rung). Active bucket carries the planes, others 0.
+    def ENC_FN(board, _e=encode, _n=NIN):  # _n bound at def time (hk lesson: ZCA wrap rebinds NIN_ENC)
+        x = _e(board)
+        k = board.king(chess.WHITE)
+        b = 2 * (chess.square_file(k) >= 4) + (chess.square_rank(k) >= 4)
+        out = np.zeros(4 * _n, dtype=np.float32)
+        out[b * _n:(b + 1) * _n] = x
+        return out
 elif ENC == "nk":
     from kanerva_enc import encode_kanerva as ENC_FN, K_OUT as NIN_ENC
 else:
@@ -261,7 +275,8 @@ class ValueNet(nn.Module):
     def __init__(self, arch="linear", hidden=64, nin=NIN):
         super().__init__()
         if arch == "mlp":
-            self.head = nn.Sequential(nn.Linear(nin, hidden), nn.ReLU(), nn.Linear(hidden, 1))
+            act = nn.Hardtanh(0.0, 1.0) if CRELU else nn.ReLU()   # Hardtanh(0,1) = clipped ReLU
+            self.head = nn.Sequential(nn.Linear(nin, hidden), act, nn.Linear(hidden, 1))
         else:
             self.head = nn.Linear(nin, 1)
 

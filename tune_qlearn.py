@@ -132,6 +132,12 @@ else:
     if DISG_TUNE:
         REGIME += "|dis-gamma|v1"
         SPACE += "|dis_gamma[0.0,0.8]"
+    if os.environ.get("QLEARN_KC_FAITHFUL") == "0":
+        REGIME += "|adam-replay|v1"                      # Merge 20 capacity re-audit: explicit
+        # non-faithful regime (Adam + replay batches). Token added ONLY on the new value ("0")
+        # so every prior study hash (faithful/unset launches) stays resume-compatible.
+    if os.environ.get("QLEARN_CRELU") == "1":
+        REGIME += "|crelu|v1"                            # clipped-ReLU hidden activation
     if os.environ.get("QLEARN_TUNE_SEED"):
         REGIME += "|seed-" + os.environ["QLEARN_TUNE_SEED"].split("/")[-1].replace(".pt", "")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
@@ -190,6 +196,9 @@ def run_trial(p, trial_no):
                 seed = ("models/qlearn_wseed.pt" if ZCA_ENV
                         else TDLEAF_SEED.replace(".pt", f"_{ENC}.pt"))
             seed = os.environ.get("QLEARN_TUNE_SEED", seed)   # :Provenance: clean-seed override
+            ck = os.environ.get("QLEARN_TUNE_CKPT") or ck     # per-study ckpt override: parallel
+            # studies sharing OPP+ENC (e.g. two pst/graded arch arms) must not clobber one
+            # another's trial checkpoints; path is NOT part of the study identity hash
             env["QLEARN_CKPT"] = ck
             shutil.copyfile(seed, ck)
             shutil.copyfile(seed, ck.replace(".pt", "_best.pt"))
@@ -204,7 +213,8 @@ def run_trial(p, trial_no):
                       "QLEARN_PARGEN_SOFTMAX", "QLEARN_STALE_REHEAT", "QLEARN_TUNE_SEED",
                       "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK", "QLEARN_DDQN",
                       "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY",
-                      "QLEARN_LR_WARMUP", "QLEARN_PHASE_MIX", "QLEARN_DIS_GAMMA"):
+                      "QLEARN_LR_WARMUP", "QLEARN_PHASE_MIX", "QLEARN_DIS_GAMMA",
+                      "QLEARN_CRELU"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:

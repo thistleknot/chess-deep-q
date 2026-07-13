@@ -49,12 +49,22 @@ def live_rows():
                            ("bake2 5k PCA-512", "PCA", "bake2_pca5k"),
                            ("organ lr-warmup", "809", "bake3_lrwu"),
                            ("organ phase-mix", "809", "bake3_phase"),
-                           ("organ dis-gamma", "809", "bake3_disgamma")):
+                           ("organ dis-gamma", "809", "bake3_disgamma"),
+                           ("bake4 kpst 4-kingbucket", "809", "bake4_kpst"),
+                           ("bake4 mlp64 crelu+adam", "capacity", "bake4_mlpcr"),
+                           ("bake4 linear adam (ctl)", "capacity", "bake4_linadam")):
         p = f"data/{tag}.log"
         if os.path.exists(p):
-            m = re.search(r"best elo ([0-9.]+)", open(p, errors="replace").read())
+            txt = open(p, errors="replace").read()
+            m = re.search(r"best elo ([0-9.]+)", txt)
             if m:
                 rows.append((name + " (study best)", fam, float(m.group(1)), None, None, "3-trial study"))
+            else:                                          # study still running: best-so-far per trial line
+                ts = [float(v) for v in re.findall(r"trial \d+: elo (-?[0-9.]+)", txt)]
+                ts = [t for t in ts if t > -900]           # drop the -999 crashed-trial sentinel
+                if ts:
+                    rows.append((f"{name} (LIVE, {len(ts)} trial{'s' if len(ts) > 1 else ''})",
+                                 fam, max(ts), None, None, "study running"))
     if os.path.exists("data/qlearn_results.jsonl"):
         for ln in open("data/qlearn_results.jsonl"):
             try:
