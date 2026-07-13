@@ -116,10 +116,10 @@ def launch_leg(arm, knobs):
     metrics = f"data/relay_{arm}.jsonl"
     if os.path.exists(metrics):
         os.remove(metrics)
-    env = dict(os.environ, **BASE,
-               QLEARN_TAU_START=f"{knobs['tau']:.4f}", QLEARN_ALPHA=f"{knobs['alpha']:.6f}",
-               QLEARN_CKPT=ck, QLEARN_METRICS=metrics, QLEARN_TAG=f"relay_{arm}",
-               QLEARN_SEED=str(int(time.time()) % 9973))
+    env = {**os.environ, **BASE,                     # overrides win over BASE (knob scaling)
+           "QLEARN_TAU_START": f"{knobs['tau']:.4f}", "QLEARN_ALPHA": f"{knobs['alpha']:.6f}",
+           "QLEARN_CKPT": ck, "QLEARN_METRICS": metrics, "QLEARN_TAG": f"relay_{arm}",
+           "QLEARN_SEED": str(int(time.time()) % 9973)}
     out = open(f"data/relay_{arm}.log", "w")
     return subprocess.Popen([PY, "qlearn.py", str(EPOCH_GAMES), str(LEG_EPOCHS)],
                             env=env, stdout=out, stderr=subprocess.STDOUT, cwd=ROOT)
@@ -138,10 +138,15 @@ def main():
         print(f"DRY | signature {sig} -> order: {desc}")
         return
 
-    knobs = {"tau": 0.7, "alpha": 0.0003}
+    # Leg 0 = the monolithic run's tail: diagnose it so leg 1 already carries an order
+    # (otherwise leg 1 T would be a pure seed-replicate of C).
+    tail = epoch_series("data/qlearn_metrics.jsonl")[-8:]
+    sig0 = diagnose(tail, leg_bar=baton_bar, baton_bar=baton_bar + 1e-9)
+    knobs, desc0 = order_for(sig0, {"tau": 0.7, "alpha": 0.0003})
     spent, leg_no = 0, 0
     log_event([f"## relay start {time.strftime('%Y-%m-%d %H:%M')}",
-               f"1. baton {BATON_CKPT} bar {baton_bar:.2f} | leg={LEG_EPOCHS}ep budget={BUDGET}ep"])
+               f"1. baton {BATON_CKPT} bar {baton_bar:.2f} | leg={LEG_EPOCHS}ep budget={BUDGET}ep",
+               f"2. leg-0 (monolith tail) signature {sig0} -> leg-1 order: {desc0}"])
     while spent < BUDGET and not os.path.exists(STOP):
         leg_no += 1
         pT, pC = launch_leg("T", knobs), launch_leg("C", {"tau": 0.7, "alpha": 0.0003})
