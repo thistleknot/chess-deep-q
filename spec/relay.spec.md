@@ -54,3 +54,14 @@ control wins by cost (the rule table dies by its own protocol — replicate-befo
 ## Operator gates
 
 Leg 1 fires on operator go. data/relay.stop halts the driver at the next leg boundary.
+
+## Acceptance verdict (2026-07-12, ran same-day)
+
+Five pairs, 30 epochs, from the 12.87 baton: EVERY pair tied at the baton (no arm crowned);
+every tweak refuted by its control; rule table cooled/reheated tau across 0.498..1.181 with
+no effect. Verdict: diagnosed restarts did NOT beat plain resume — control wins by cost —
+AND nothing beat the baton at all. The 12.87 crown (monolith epoch 2) survived the
+monolith tail + 30 relay epochs across 10 arms: the pst-769 linear ceiling is CONFIRMED
+~12.9 at this protocol, consistent with the 4-way triangulated linear ceiling (11.2-13.9).
+Rule-table defect logged: repeated REGRESS spirals tau downward (0.498) — fresh legs
+always score noisy-low epochs vs a strong baton; any revival needs a REGRESS repeat-cap.

@@ -26,6 +26,7 @@ CANONICAL = [
     ("material pop (ZCA*)",  "809",     None, None, 13.94, "declared constants"),
     ("Kanerva-512 (21ep)",   "Kanerva", 744, None, 6.24,  "5k->K512->ZCA, first leg"),
     ("Kanerva-512 (30ep)",   "Kanerva", 700, None, 7.69,  "full horizon"),
+    ("pst-769 p7 (graduated)", "809",   885, None, 12.87, "round-2 winner; ceiling relay-confirmed"),
 ]
 
 
