@@ -34,3 +34,5 @@ would be sufficient to identify the appropriate feature set — 3 trials per").
 - Architectures: linear (B0, running) vs mlp-64 (mlpb, running) — the shutdown-clause arm.
 - Organs (parallel studies running): surprise / surprise+GRPO / surprise+replayT / DDQN.
 - Graduated: kczca 30-epoch run on the 942 parms — running.
+
+- :Relay: (spec/relay.spec.md) — run-timescale organ: diagnosed-restart waves with paired controls; acceptance = beats control-only relay over the same budget (Merge 19).
