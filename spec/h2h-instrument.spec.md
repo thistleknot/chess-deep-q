@@ -21,8 +21,14 @@ per-game information is maximal. ~300 games → ±~40 Elo band at zero SF cost.
   games. Value quality does not express at 1 ply; the discriminating signal lives at
   depth (strength=search, 7th independent corroboration). Any policy change to this
   instrument must re-pass G1/G2b.
-- **Adjudication**: rules result; at PLY_CAP=160, material count (1/3/3/5/9), diff ≥ 2
-  pawns → win, else draw. (Standard engine-testing adjudication; declared constant.)
+- **Adjudication**: rules result; at PLY_CAP=160, material count (1/3/3/5/9), diff ≥ 1
+  pawn → win, else draw. (Declared. Was ≥2: the 2-pawn window drew 88% of G2b(d2) games
+  — champion +37 with band −12..+85, gate unreadable. Between same-class sub-floor nets
+  material at the cap is the skill signal; 1 pawn trades a small truth distortion in
+  drawn-in-truth pawn-up endings for ~3× effective sample.)
+- **Duel size**: gates and verdict rungs run 600 games (band ≈ ±28 at p≈0.55) — duel
+  Elo is COMPRESSED relative to SF-anchored Elo (draw-heavy same-class play), so the
+  band must be sized to the compressed differential, not the absolute scale.
 - **Verdict numbers**: score s (draws=0.5), Elo diff via measure_elo.elo_diff(s, n),
   95% Wilson band on s mapped through elo_diff, decisive rate (instrument health).
 

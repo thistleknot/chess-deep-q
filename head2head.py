@@ -27,7 +27,10 @@ from search_policy import search_move  # noqa: E402
 
 OPEN_PLIES = 6
 PLY_CAP = 160
-ADJ_MATERIAL = 2                     # pawns of material = adjudicated win at the cap
+ADJ_MATERIAL = 1                     # pawns of material = adjudicated win at the cap
+# (was 2: at d2 the 2-pawn window drew 88% of champion-vs-585 games — draw flood starved
+# the band, G2b came back +37 (-12..+85). 1 pawn declared: between same-class sub-floor
+# nets, material at the cap IS the skill differential being measured.)
 SEED = 20                            # one seed per battery: identical openings across rungs
 VALS = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
 
