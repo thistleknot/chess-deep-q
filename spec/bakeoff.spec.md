@@ -88,3 +88,30 @@ would be sufficient to identify the appropriate feature set — 3 trials per").
   (replicate-before-invent: jw1912/bullet on self-generated labels, result weight 0),
   where generation throughput is fixed simultaneously. Bullet route = separate merge,
   operator go required.
+
+## Volume-curve probe (2026-07-13, SME-gated bullet go-condition #1) — STOP FIRED
+
+Pre-registered: bullet green only if mlp's 100%−25% delta clears ~100 while linear's
+stays in band. Measured (1 run/point, proven parms, Adam+replay regime, bake4 seeds;
+100% points = the bake4 pair):
+
+| games/epoch | linear+adam | mlp64cr+adam | Δ mlp−lin |
+|---|---|---|---|
+| 25  | 584.9 | 586.6 | +1.7 |
+| 50  | 781.6 | 782.0 | +0.4 |
+| 100 | 781.1 | 783.4 | +2.3 |
+
+1. Differential is DEAD FLAT (≤2.3 at every volume) — the flat-flat stop condition per
+   pre-registration: bullet clone does NOT proceed on this evidence.
+2. RE-DIAGNOSIS (root cause of the flatness): the pooled objective QUANTIZES at this
+   scale — pooled Elo is driven by SF half-points over ~36 games (0/36→~585, 1/36→~709,
+   1.5/36→~782). Four independent runs across two architectures and two volumes ≥50 all
+   pin at the SAME grid point (~782). The instrument cannot resolve a differential
+   smaller than ~1 SF half-point (~70–120 Elo) — so "both flat 50→100" is
+   instrument-pinning, not (for the MLP) an evidenced ceiling. Linear's flatness stays
+   corroborated by its independent 5-way ceiling; the MLP's is measurement-limited.
+3. Consequence: the probe range (25–100 games ≈ 10³–10⁴ positions/run) never left the
+   objective's noise floor. Any future volume claim needs a finer instrument FIRST —
+   more SF games per point (background lane) or a graded-rung pooled objective that
+   isn't floored — before more volume rungs are bought. Bullet gate stays CLOSED until
+   an instrument-grade slope exists; re-open is an operator decision.

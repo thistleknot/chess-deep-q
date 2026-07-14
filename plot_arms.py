@@ -65,6 +65,16 @@ def live_rows():
                 if ts:
                     rows.append((f"{name} (LIVE, {len(ts)} trial{'s' if len(ts) > 1 else ''})",
                                  fam, max(ts), None, None, "study running"))
+    for name, fam, tag in (("probe linear+adam s25", "capacity", "probe_lin25"),
+                           ("probe linear+adam s50", "capacity", "probe_lin50"),
+                           ("probe mlp64cr+adam s25", "capacity", "probe_mlp25"),
+                           ("probe mlp64cr+adam s50", "capacity", "probe_mlp50")):
+        p = f"data/{tag}.log"
+        if os.path.exists(p):
+            m = re.search(r"KILL-CHECK\s+elo\s+(-?[0-9.]+)", open(p, errors="replace").read())
+            if m:
+                rows.append((name, fam, float(m.group(1)), None, None,
+                             "volume-curve probe (100% pts = bake4 781/783)"))
     if os.path.exists("data/qlearn_results.jsonl"):
         for ln in open("data/qlearn_results.jsonl"):
             try:
