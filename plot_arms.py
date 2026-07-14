@@ -30,6 +30,8 @@ CANONICAL = [
     ("pst-769 p7 (graduated)", "809",   885, None, 12.87, "round-2 winner; ceiling relay-confirmed"),
     ("CHAMPION grad1600 (d7 claims)", "809", 1572, (1516, 1642), 40.83,
      "RECORD: 126W-72D-2L @200g vs SF@1320, rsearch d7; self-play 30x1000"),
+    ("CHAMPION grad1600 (d9 claims) ★GOAL", "809", 1670, (1605, 1762), None,
+     "GOAL MET: 153W-47D-0L @200g vs SF@1320, rsearch d9 — CI floor 1605 > 1600"),
 ]
 
 
