@@ -353,8 +353,12 @@ def api_train_metrics():
 
 @app.get("/compare", response_class=HTMLResponse)
 def compare():
-    """Elo-per-feature-set comparison (rebuilt on every request from ledger + live logs)."""
+    """Elo-per-feature-set comparison (rebuilt on every request from ledger + live logs).
+    reload(): plot_arms is edited during live campaigns — the once-imported module cache
+    served stale panels (observed: duel table + probe rows missing until restart)."""
+    import importlib
     import plot_arms
+    importlib.reload(plot_arms)
     return plot_arms.build()
 
 
