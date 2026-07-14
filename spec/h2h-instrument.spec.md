@@ -52,8 +52,34 @@ per-game information is maximal. ~300 games → ±~40 Elo band at zero SF cost.
   - G3 health: decisive rate ≥ 20% (below that, the band is too wide to meet the
     charter's success test — widen N or revisit adjudication before reading verdicts).
 
+## Validation record (2026-07-13) — INSTRUMENT ACCEPTED
+
+- G1 null (τ build): lin50 self-duel, 100g → 0.490, band spans 0.5 ✓
+- G2b: champion vs lin25, 600g → 0.681 = **+132 Elo (95% +102..+161)** ✓ (compare the
+  old ruler: same pair unreadable at +27..+37 with bands spanning 0)
+- G3 health: decisive 97% ✓ (was 10-12% pre-dither)
+
 ## Verdict protocol (charter)
 
 Duels mlp_v vs lin_v at v ∈ {25, 50, 100}. SUCCESS = |Elo diff| > band at v=100 (either
 direction), slope read across rungs. Arms inseparable at 4× volume (|diff| ≤ band with
 G3 healthy) → STOP-LOSS: capacity closed PERMANENTLY, re-diagnosis delivered.
+
+## Rung results (2026-07-13, 600g each, seed-0 training runs)
+
+| rung | mlp − lin | 95% band | decisive |
+|---|---|---|---|
+| 25  | −1  | −28..+27 | 98% |
+| 50  | +52 | +24..+80 | 98% |
+| 100 | +23 | −5..+50  | 98% |
+
+Onset slope 25→50 significant (+53 ± ~40); no growth 50→100 (−29 ± ~40); pooled 50+100
+(1200g): **+37 (+17..+57)** — excludes zero. First direct capacity separation ever
+measured in this repo. Caveat: n=1 TRAINING run per rung — duel bands cover measurement
+noise only, not training-seed noise.
+
+**Confirmation leg (pre-registered before launch):** retrain both s50 arms at
+QLEARN_SEED=1, duel 600g (`rung50b`). mlp-up, band excludes 0 → capacity effect
+CONFIRMED (constant small effect ≈ +35 duel-Elo at ≥2× volume; charter closes SUCCESS).
+Band spans 0 → pooled across seeds decides. Sign REVERSED beyond band → seed variance
+dominates, rung-50 result downgraded to unconfirmed, more seeds or stop-loss review.
