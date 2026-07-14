@@ -83,3 +83,21 @@ QLEARN_SEED=1, duel 600g (`rung50b`). mlp-up, band excludes 0 → capacity effec
 CONFIRMED (constant small effect ≈ +35 duel-Elo at ≥2× volume; charter closes SUCCESS).
 Band spans 0 → pooled across seeds decides. Sign REVERSED beyond band → seed variance
 dominates, rung-50 result downgraded to unconfirmed, more seeds or stop-loss review.
+
+## CHARTER VERDICT (2026-07-13) — SUCCESS branch, confirmed
+
+rung50b (seed 1): **+30 (95% +2..+58)**, mlp up, band excludes zero → CONFIRMED per the
+pre-registered rule. Two independent training seeds, same sign, both exclude zero
+(seed 0: +52 +24..+80; seed 1: +30 +2..+58; pooled 1200g ≈ +41).
+
+**The instrument-grade answer to "does capacity pay with volume":**
+1. Capacity PAYS — a small, replicated ~+30..+50 duel-Elo edge for mlp64-crelu over
+   linear, measurable from 50 games/epoch. The prior "capacity closed: dead tie"
+   verdict was INSTRUMENT BLINDNESS, now formally overturned at the differential level.
+2. Volume does NOT (yet) — no measured growth 25→100 games beyond the onset; the
+   "more data unlocks more capacity" scaling story is UNSUPPORTED in the tested decade.
+   The 10⁷⁺ regime remains empirically open (and the canon prescribes no doctrine —
+   spec/sota-notes.md).
+3. Scope limits: effect measured in the Adam+replay diagnostic regime on the duel
+   scale; transfer to the KC-faithful production recipe and to SF-anchored strength is
+   untested. The champion and leaderboard are unaffected.
