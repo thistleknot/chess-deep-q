@@ -27,6 +27,7 @@ from search_policy import search_move  # noqa: E402
 
 OPEN_PLIES = 6
 PLY_CAP = 160
+TAU = 0.02                           # KC-faithful dither: breaks argmax repetition cycles
 ADJ_MATERIAL = 1                     # pawns of material = adjudicated win at the cap
 # (was 2: at d2 the 2-pawn window drew 88% of champion-vs-585 games — draw flood starved
 # the band, G2b came back +37 (-12..+85). 1 pawn declared: between same-class sub-floor
@@ -44,15 +45,16 @@ def load_net(path):
     return net
 
 
-def mover_of(net):
-    """Claims-measurement policy, mirrored exactly from QAgent.greedy_move: depth-2
-    width-8 search argmax over the net's batched value_fn. (The greedy-1-ply variant
-    FAILED gate G2b — champion vs 585-class net scored 0.487 — pinned in the spec:
-    value quality only expresses through search; strength=search, 7th corroboration.)"""
+def mover_of(net, rng):
+    """Duel policy: depth-2 width-8 search, root softmax at TAU=0.02 (the KC-faithful
+    dither). Two pinned failures forced both choices (spec :Assert:): 1-ply greedy
+    can't express value quality at all (champion 0.487 vs 585-class); pure d2 ARGMAX
+    collapses 29/30 games into fivefold repetition (deterministic cycle lock) — the
+    dither exists to break cycles, not to explore."""
     def vf(X):
         with torch.no_grad():
             return net(torch.from_numpy(X)).numpy().reshape(-1)
-    return lambda board: search_move(board, vf, 0.0, None, 8, depth=2, encode_fn=encode)
+    return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=encode)
 
 
 def material_sign(board):
@@ -103,8 +105,8 @@ def main():
     a_path, b_path = sys.argv[1], sys.argv[2]
     games = (int(sys.argv[3]) if len(sys.argv) > 3 else 300) // 2 * 2
     tag = sys.argv[4] if len(sys.argv) > 4 else "adhoc"
-    A, B = mover_of(load_net(a_path)), mover_of(load_net(b_path))
     rng = random.Random(SEED)
+    A, B = mover_of(load_net(a_path), rng), mover_of(load_net(b_path), rng)
     score = decisive = 0.0
     for i, opening in enumerate(make_openings(games // 2, rng)):
         for a_white in (True, False):

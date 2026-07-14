@@ -13,14 +13,17 @@ per-game information is maximal. ~300 games → ±~40 Elo band at zero SF cost.
 
 - **Duel** = N games between ckpt A and ckpt B. Openings: K=6 random plies from a
   seeded RNG; each opening played TWICE with colors swapped (paired design — opening
-  bias cancels). Move policy: the CLAIMS MEASUREMENT policy, mirrored exactly from
-  QAgent.greedy_move — depth-2 width-8 search argmax over the net's batched value_fn.
-  Deterministic given the opening.
-  **Pinned negative (2026-07-13)**: the first build used 1-ply greedy and FAILED G2b —
-  the champion (12.87 crown, 5-way confirmed) scored 0.487 vs a 585-class net over 200
-  games. Value quality does not express at 1 ply; the discriminating signal lives at
-  depth (strength=search, 7th independent corroboration). Any policy change to this
-  instrument must re-pass G1/G2b.
+  bias cancels). Move policy: depth-2 width-8 search with root softmax at τ=0.02 (the
+  KC-faithful dither) over the net's batched value_fn.
+  **Pinned negatives (2026-07-13) — both constants are forced, re-pass G1/G2b on any
+  policy change**:
+  1. 1-ply greedy FAILED G2b — champion (12.87 crown, 5-way confirmed) scored 0.487 vs
+     a 585-class net / 200g. Value quality does not express at 1 ply (strength=search,
+     7th corroboration).
+  2. d2 pure ARGMAX (τ=0) FAILED by repetition collapse — census: 29/30 games ended in
+     FIVEFOLD_REPETITION (deterministic policies cycle-lock; decisive rate 10-12%, G2b
+     +27..+37 with bands spanning 0 at 200-600g). The τ=0.02 dither breaks cycles; it
+     is NOT exploration.
 - **Adjudication**: rules result; at PLY_CAP=160, material count (1/3/3/5/9), diff ≥ 1
   pawn → win, else draw. (Declared. Was ≥2: the 2-pawn window drew 88% of G2b(d2) games
   — champion +37 with band −12..+85, gate unreadable. Between same-class sub-floor nets
