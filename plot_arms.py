@@ -28,6 +28,8 @@ CANONICAL = [
     ("Kanerva-512 (21ep)",   "Kanerva", 744, None, 6.24,  "5k->K512->ZCA, first leg"),
     ("Kanerva-512 (30ep)",   "Kanerva", 700, None, 7.69,  "full horizon"),
     ("pst-769 p7 (graduated)", "809",   885, None, 12.87, "round-2 winner; ceiling relay-confirmed"),
+    ("CHAMPION grad1600 (d7 claims)", "809", 1572, (1516, 1642), 40.83,
+     "RECORD: 126W-72D-2L @200g vs SF@1320, rsearch d7; self-play 30x1000"),
 ]
 
 
