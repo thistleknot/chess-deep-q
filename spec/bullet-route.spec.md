@@ -84,6 +84,29 @@ weak value net with a flat prior at low sims, Grill et al. 2020's exact degenera
   G-M3: 60g SF@1320 rung; then the standard claims ladder.
 - Rollout-mixed leaf eval (Q8-endorsed) is a declared OPTIONAL dial, OFF at G-M1.
 
+## Verdicts (2026-07-13/14 — screening tier CLOSED, decision made)
+
+- Teacher duel: bullet arm 1 **−62 (−90..−34)** vs volume teacher at d2-beam → arm 1
+  does not graduate at this corpus size.
+- G-M1: PUCT-200 vs d2-beam, SAME nnue eval: **0.970 → +604 (+414..+794)** — the MCTS
+  door works as search (operator's claim confirmed: selective deepening crushes the
+  shallow beam).
+- Fork smoke: PUCT-200+nnue vs **rsearch-d7+linear incumbent: 0/8** — python MCTS at
+  200 sims cannot bridge the native engine's ~1000× node throughput; with the eval
+  also −62, the fork closes. MCTS-door stays open as a future vehicle for nonlinear
+  nets pending native/GPU-batched search (revisit-later bucket, operator-blessed).
+- **GRADUATED-RUN DECISION** (task #32, operator-delegated): vehicle = rsearch d7
+  (unbeaten); net = kc-809 linear (the ONLY rsearch-compatible arch — pst-769 is
+  769-dim and cannot ride the native engine); config = the RECORD arm's recipe
+  (1540 claims): kc+ZCA(models/zca.npz) linear, KC-faithful TDLeaf d2 native targets
+  (RSEARCH_DEPTH=2), tuned trivium anneal (0.285,0.341,0.374 → 0.516,0.341,0.143 @
+  0.481), α=3e-4, PARGEN native self-play (batch 200, 12 threads, ε=0.1, opp=frozen
+  self), confirm-on, patience 4, 30×1000 games, seed = models/qlearn_wseed.pt
+  (pristine whitened — provenance caveats carried exactly as the ledger recorded them
+  for the record arm; env reconstructed from experiments.md 2026-07-11 entries, knobs
+  not stated in prose take module defaults, RECONSTRUCTION declared).
+  Deliverable: final Elo for operator view → claims ladder (60g d7 rung → 200g).
+
 ## Acceptance
 
 Bullet route graduates to step 2 (10× corpus) only if a bullet arm beats BOTH its

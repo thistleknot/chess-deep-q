@@ -103,6 +103,18 @@ def mover_from_spec(spec, rng):
         sims = int(sims_s)
         vf, enc = evaluator_from_spec(inner)
         return lambda board: puct_move(board, vf, enc, sims, rng)
+    if spec.startswith("rs:"):
+        # native alpha-beta at depth D over a kc-809 linear ckpt — the incumbent's
+        # own vehicle (deterministic; a losing side steering into repetition is
+        # legitimate play, so no dither on this side)
+        import importlib
+        _, d_s, inner = spec.split(":", 2)
+        depth = int(d_s)
+        assert inner.startswith("kcz:"), "rs: mover needs a kcz:<ckpt> inner spec"
+        from corpus_gen import raw_weights
+        w, b = raw_weights(inner[4:])
+        srch = importlib.import_module("rsearch4").Searcher(w, b)
+        return lambda board: chess.Move.from_uci(srch.search(board.fen(), depth)[0])
     vf, enc = evaluator_from_spec(spec)
     return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=enc)
 
