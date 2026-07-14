@@ -11,6 +11,7 @@ live numbers (bake-off bests, b0/mlpb finals) are re-read on every build.
 
 Usage: python plot_arms.py  -> data/compare.html   (server serves it at /compare)
 """
+import glob
 import json
 import os
 import re
@@ -88,6 +89,19 @@ def live_rows():
     return rows
 
 
+def h2h_rows():
+    """Duel-differential results (head2head.py) — OWN scale (duel Elo is compressed);
+    never plotted on the pooled axis (statistic-class separation, operator rule)."""
+    rows = []
+    for p in sorted(glob.glob("data/h2h_*.md")):
+        for ln in open(p, errors="replace"):
+            m = re.match(r"h2h (\S+): A=(\S+) vs B=(\S+) \| (\d+)g score ([0-9.]+) -> "
+                         r"Elo ([+-]?\d+) \(95% ([+-]?\d+)\.\.([+-]?\d+)\) \| decisive (\d+)%", ln)
+            if m:
+                rows.append(m.groups())
+    return rows
+
+
 def panel(title, rows, key, unit):
     vals = [(a, f, v, ci) for (a, f, v, ci, *_ ) in rows if v is not None]
     if not vals:
@@ -127,6 +141,12 @@ def build():
     for r in live_rows():
         tbl += f"<tr><td>{r[0]}</td><td>{r[1]}</td><td>{r[2]:.0f}</td><td>—</td><td>{r[5]}</td></tr>"
     tbl += "</table>"
+    h2h_tbl = ("<table class='lad'><tr><th>duel</th><th>A</th><th>B</th><th>games</th>"
+               "<th>A−B duel Elo (95%)</th><th>decisive</th></tr>")
+    for (tag, a, b, g, _s, e, lo_, hi_, dec) in h2h_rows():
+        h2h_tbl += (f"<tr><td>{tag}</td><td>{a}</td><td>{b}</td><td>{g}</td>"
+                    f"<td>{e} ({lo_}..{hi_})</td><td>{dec}%</td></tr>")
+    h2h_tbl += "</table>"
     html = f"""<!doctype html><html><head><meta charset='utf-8'><title>Elo per feature set</title>
 <style>body{{background:#0d1117;color:#e6edf3;font:14px/1.5 system-ui;margin:0;padding:24px;max-width:960px}}
 .card{{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin-bottom:18px}}
@@ -138,6 +158,7 @@ table.lad td{{padding:4px 8px;border-bottom:1px solid #21262d}}</style></head><b
 <p class='sub'>{legend}</p>
 {panel("pooled final Elo (KILL-CHECK protocol)", [(a,f,v,ci) for (a,f,v,ci,*_ ) in rows_final], "pf", "Elo")}
 {panel("best confirmed crown (d2 scale)", rows_crown, "cr", "crown")}
+<div class='card'><h2>head-to-head duels (DUEL Elo — compressed scale, A minus B; never comparable to the pooled axis)</h2>{h2h_tbl}</div>
 <div class='card'><h2>table view</h2>{tbl}</div>
 </body></html>"""
     open("data/compare.html", "w", encoding="utf-8").write(html)
