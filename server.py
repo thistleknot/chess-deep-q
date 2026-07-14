@@ -454,6 +454,7 @@ PAGE = r"""<!doctype html>
   <div class="card"><h2>Live training</h2>
     <div class="tiles">
       <div class="tile"><div class="k">Final Elo</div><div class="v" id="t-elo">—</div></div>
+      <div class="tile"><div class="k">Champion (claims, banked)</div><div class="v" id="t-champ">—</div></div>
       <div class="tile"><div class="k">Epoch</div><div class="v" id="t-epoch">—</div></div>
       <div class="tile"><div class="k">λ (adapted)</div><div class="v" id="t-lam">—</div></div>
       <div class="tile"><div class="k">Buffer</div><div class="v" id="t-buf">—</div></div>
@@ -676,6 +677,13 @@ async function pollLadder(){
       document.getElementById('lad-latest').textContent=`${last.elo} (${last.elo_lo}..${last.elo_hi})`;
       document.getElementById('lad-best').textContent=`${best.elo} (${best.elo_lo}..${best.elo_hi})`;
       document.getElementById('lad-n').textContent=rows.length;
+      // ratchet tile in the LIVE strip: the banked high-water at CLAIMS grade (>=200g),
+      // so a sagging live curve can never hide the best net we already hold
+      const claims=cand.filter(x=>x.games>=200);
+      if(claims.length){
+        let bc=claims[0]; for(const x of claims) if(x.elo>bc.elo) bc=x;
+        document.getElementById('t-champ').textContent=`${bc.elo} (${bc.elo_lo}..${bc.elo_hi})`;
+      }
       // ---- table: most recent first ----
       const rec=rows.slice(-10).reverse();
       document.getElementById('lad-table').innerHTML=
