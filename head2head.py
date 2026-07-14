@@ -45,6 +45,48 @@ def load_net(path):
     return net
 
 
+def mover_from_spec(spec, rng):
+    """Build a mover from a net spec (same duel policy for every dialect):
+    - plain path              -> pst-encoded ValueNet ckpt (linear/mlp), existing loader
+    - 'nnue:<raw.bin>'        -> bullet (768->H)x2 SCReLU net (nnue_eval.NNUEEval)
+    - 'kcz:<ckpt.pt>'         -> kc-809 linear ckpt incl. ZCA back-conversion
+                                 (identity-gated in corpus_gen.raw_weights)"""
+    import math
+    if spec.startswith("nnue:"):
+        from nnue_eval import NNUEEval
+        from cem_loop import encode  # noqa: F401 (kept: search fallback dims)
+        net = NNUEEval(spec[5:])
+
+        def enc(board, _n=net):
+            x = np.zeros(1537, dtype=np.float32)
+            fs, fn = _n.features(board)
+            x[fs] = 1.0
+            x[[768 + i for i in fn]] = 1.0
+            x[1536] = 1.0 if board.turn == chess.WHITE else 0.0
+            return x
+
+        def vf(X, _n=net):
+            acc_s = X[:, :768] @ _n.l0w + _n.l0b
+            acc_n = X[:, 768:1536] @ _n.l0w + _n.l0b
+            h = np.concatenate([np.clip(acc_s, 0, 1) ** 2, np.clip(acc_n, 0, 1) ** 2], axis=1)
+            out = h @ _n.l1w + _n.l1b
+            return np.where(X[:, 1536] > 0.5, out, -out).astype(np.float64)
+
+        return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=enc)
+    if spec.startswith("kcz:"):
+        from corpus_gen import raw_weights
+        from cem_loop import encode_features
+        w, b = raw_weights(spec[4:])
+        w = np.asarray(w, dtype=np.float64)
+
+        def vf(X, _w=w, _b=b):
+            return np.tanh(X @ _w + _b)
+
+        return lambda board: search_move(board, vf, TAU, rng, 8, depth=2,
+                                         encode_fn=encode_features)
+    return mover_of(load_net(spec), rng)
+
+
 def mover_of(net, rng):
     """Duel policy: depth-2 width-8 search, root softmax at TAU=0.02 (the KC-faithful
     dither). Two pinned failures forced both choices (spec :Assert:): 1-ply greedy
@@ -106,7 +148,7 @@ def main():
     games = (int(sys.argv[3]) if len(sys.argv) > 3 else 300) // 2 * 2
     tag = sys.argv[4] if len(sys.argv) > 4 else "adhoc"
     rng = random.Random(SEED)
-    A, B = mover_of(load_net(a_path), rng), mover_of(load_net(b_path), rng)
+    A, B = mover_from_spec(a_path, rng), mover_from_spec(b_path, rng)
     score = decisive = 0.0
     for i, opening in enumerate(make_openings(games // 2, rng)):
         for a_white in (True, False):
