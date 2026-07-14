@@ -45,16 +45,14 @@ def load_net(path):
     return net
 
 
-def mover_from_spec(spec, rng):
-    """Build a mover from a net spec (same duel policy for every dialect):
-    - plain path              -> pst-encoded ValueNet ckpt (linear/mlp), existing loader
-    - 'nnue:<raw.bin>'        -> bullet (768->H)x2 SCReLU net (nnue_eval.NNUEEval)
-    - 'kcz:<ckpt.pt>'         -> kc-809 linear ckpt incl. ZCA back-conversion
-                                 (identity-gated in corpus_gen.raw_weights)"""
-    import math
+def evaluator_from_spec(spec):
+    """(vf, enc) for a net spec — vf(X)->(n,) WHITE-absolute values, enc(board)->(d,):
+    - plain path         -> pst-encoded ValueNet ckpt (linear/mlp)
+    - 'nnue:<raw.bin>'   -> bullet (768->H)x2 SCReLU net (nnue_eval.NNUEEval)
+    - 'kcz:<ckpt.pt>'    -> kc-809 linear ckpt incl. ZCA back-conversion
+                            (identity-gated in corpus_gen.raw_weights)"""
     if spec.startswith("nnue:"):
         from nnue_eval import NNUEEval
-        from cem_loop import encode  # noqa: F401 (kept: search fallback dims)
         net = NNUEEval(spec[5:])
 
         def enc(board, _n=net):
@@ -72,7 +70,7 @@ def mover_from_spec(spec, rng):
             out = h @ _n.l1w + _n.l1b
             return np.where(X[:, 1536] > 0.5, out, -out).astype(np.float64)
 
-        return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=enc)
+        return vf, enc
     if spec.startswith("kcz:"):
         from corpus_gen import raw_weights
         from cem_loop import encode_features
@@ -82,21 +80,31 @@ def mover_from_spec(spec, rng):
         def vf(X, _w=w, _b=b):
             return np.tanh(X @ _w + _b)
 
-        return lambda board: search_move(board, vf, TAU, rng, 8, depth=2,
-                                         encode_fn=encode_features)
-    return mover_of(load_net(spec), rng)
+        return vf, encode_features
+    net = load_net(spec)
 
-
-def mover_of(net, rng):
-    """Duel policy: depth-2 width-8 search, root softmax at TAU=0.02 (the KC-faithful
-    dither). Two pinned failures forced both choices (spec :Assert:): 1-ply greedy
-    can't express value quality at all (champion 0.487 vs 585-class); pure d2 ARGMAX
-    collapses 29/30 games into fivefold repetition (deterministic cycle lock) — the
-    dither exists to break cycles, not to explore."""
-    def vf(X):
+    def vf(X, _n=net):
         with torch.no_grad():
-            return net(torch.from_numpy(X)).numpy().reshape(-1)
-    return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=encode)
+            return _n(torch.from_numpy(X)).numpy().reshape(-1)
+
+    return vf, encode
+
+
+def mover_from_spec(spec, rng):
+    """Mover = evaluator + search policy. Default policy: depth-2 width-8 beam, root
+    softmax at TAU=0.02 (the KC-faithful dither). Two pinned failures forced those
+    choices (spec :Assert:): 1-ply greedy can't express value quality (champion 0.487
+    vs 585-class); pure d2 ARGMAX collapses 29/30 games into fivefold repetition.
+    'puct:<sims>:<inner>' swaps the beam for value-only PUCT (spec :MCTS-door:) over
+    the inner spec's evaluator — same dither semantics at the root."""
+    if spec.startswith("puct:"):
+        from puct_value import puct_move
+        _, sims_s, inner = spec.split(":", 2)
+        sims = int(sims_s)
+        vf, enc = evaluator_from_spec(inner)
+        return lambda board: puct_move(board, vf, enc, sims, rng)
+    vf, enc = evaluator_from_spec(spec)
+    return lambda board: search_move(board, vf, TAU, rng, 8, depth=2, encode_fn=enc)
 
 
 def material_sign(board):

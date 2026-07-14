@@ -68,6 +68,22 @@ operator-flagged); this document now governs; future changes are spec-first agai
 - Generator strength (≈1500) unisolated in literature — mitigated by teacher-relative
   and control-relative verdicts only.
 
+## :MCTS-door: (operator-reopened 2026-07-13 — second route to depth, no Rust merge)
+
+Depth for nonlinear nets WITHOUT rsearch integration: python PUCT over the net's value
+function. The prior PUCT-parity result is NOT evidence against this door — it ran a
+weak value net with a flat prior at low sims, Grill et al. 2020's exact degenerate case.
+- **Prior (declared, hand-crafted — purity-lawful)**: P(a) = softmax over the children's
+  1-ply values at temperature T_P=0.2. Motivated by Grill (the prior is load-bearing);
+  NOT a trained policy head (that stays parked as H2).
+- **Search**: standard PUCT, c_puct=1.5 (declared), batched leaf evals, visit-count
+  move choice with the duel dither (softmax over visits, τ_v=0.02·N_sims).
+- **Gate ladder (each <15 min or background)**: G-M1: PUCT(200 sims) vs d2-beam over
+  the SAME eval, 100g duel — MCTS must convert the identical eval into MORE strength,
+  else the door closes again with a number. G-M2 (if open): sims ladder 200→800.
+  G-M3: 60g SF@1320 rung; then the standard claims ladder.
+- Rollout-mixed leaf eval (Q8-endorsed) is a declared OPTIONAL dial, OFF at G-M1.
+
 ## Acceptance
 
 Bullet route graduates to step 2 (10× corpus) only if a bullet arm beats BOTH its
