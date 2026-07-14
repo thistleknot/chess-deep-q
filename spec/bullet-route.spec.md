@@ -107,6 +107,24 @@ weak value net with a flat prior at low sims, Grill et al. 2020's exact degenera
   not stated in prose take module defaults, RECONSTRUCTION declared).
   Deliverable: final Elo for operator view → claims ladder (60g d7 rung → 200g).
 
+## :Replication-bridge: (operator-mandated 2026-07-14 — the pipeline must repeat 1670)
+
+Operator finding: 1670 was produced half-in-console, half-in-session (seed step and
+deep-measure step lived outside the Start button) — exploration without a replication
+pipeline. Bridge (server.py, console):
+1. **Seed-from-scratch**: a FRESH lineage ckpt is created by copying `seed_ckpt`
+   (default models/qlearn_wseed.pt — the champion run's exact from-scratch entry point)
+   instead of random init. Existing lineages resume untouched (ratchet mode).
+2. **Auto-ladder**: when training exits, the banked `_best` automatically runs
+   claims_rung.py at `post_rung_depth` (default 9) × `post_rung_games` (default 60) —
+   the row lands in rl_trend, moving the ladder plot and the Champion tile with no
+   manual step. (Watcher is a server daemon thread; a server restart mid-run drops it —
+   re-run manually.)
+3. Console defaults = full champion recipe + lineage `rep1`: the out-of-the-box button
+   IS the from-scratch replication experiment (wseed → 30×1000 → bank → d9 rung).
+Claims-grade (200g) stays a deliberate second step on promising rungs — 60g scouts
+keep the loop <15-min-adjacent; the ladder table records everything either way.
+
 ## Acceptance
 
 Bullet route graduates to step 2 (10× corpus) only if a bullet arm beats BOTH its

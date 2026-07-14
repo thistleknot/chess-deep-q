@@ -134,6 +134,16 @@ class TrainReq(BaseModel):
     grpo: bool = False            # (q) Merge 15 :GRPO-group:: group-whitened advantage
     replay_t: float = 0.0         # (q) Merge 15 :Replay-temperature:: admixture dial (0 = off)
     surprise_k: float = 32.0      # (q) Elo K — rating-baseline tracking speed
+    seed_ckpt: str = "models/qlearn_wseed.pt"   # :Replication-bridge:: copied to the lineage
+                                  # ckpt when that ckpt does NOT yet exist — a fresh lineage
+                                  # starts from the pristine whitened seed (the exact from-
+                                  # scratch entry point of the 1670 champion run), never from
+                                  # random init. "" = old behavior (fresh net).
+    post_rung_depth: int = 9      # :Replication-bridge:: after training exits, automatically
+                                  # run the claims ladder (claims_rung.py) on the banked _best
+                                  # at this depth — closes the train->bank->MEASURE loop the
+                                  # 1670 required. 0 = off.
+    post_rung_games: int = 60     # ladder games for the auto-rung (60 = scout; 200 = claims)
     deck: int = 0                 # (q) Merge 16 :Magic-deck: size in games (0 = off; reverted
                                   # by the M16 study verdict at trial scale — long runs only)
     # --- advanced knobs (API-only; the form doesn't render them, pydantic defaults apply) ---
@@ -288,9 +298,9 @@ def api_train_start(cfg: TrainReq):
                QLEARN_SURPRISE_K=f"{cfg.surprise_k:.1f}",
                QLEARN_DECK=str(cfg.deck),
                **({"QLEARN_DEV": cfg.device} if cfg.device else {}),
-               QLEARN_CKPT=(f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"
+               QLEARN_CKPT=(ckpt_path := (f"models/{'ac' if cfg.algo == 'ac' else 'qlearn'}_"
                             f"{cfg.lineage}.pt" if cfg.lineage else
-                            ("models/ac_learn.pt" if cfg.algo == "ac" else "models/qlearn.pt")),
+                            ("models/ac_learn.pt" if cfg.algo == "ac" else "models/qlearn.pt"))),
                QLEARN_ARCH=cfg.arch, QLEARN_HIDDEN=str(cfg.hidden), QLEARN_TAU_START=f"{cfg.tau_start:.4f}",
                QLEARN_TAU_FLOOR=f"{cfg.tau_floor:.4f}", QLEARN_LAMBDA_START=f"{cfg.lambda_start:.4f}",
                QLEARN_K_ADAPT=f"{cfg.k_adapt:.4f}", QLEARN_TRAIN_STEPS=str(cfg.train_steps),
@@ -301,6 +311,15 @@ def api_train_start(cfg: TrainReq):
                QLEARN_TAG="final")
     script = "ac_learn.py" if cfg.algo == "ac" else "qlearn.py"
     os.makedirs(os.path.join(ROOT, "data"), exist_ok=True)
+    # :Replication-bridge: step 1 — a FRESH lineage starts from the pristine seed, exactly
+    # like the 1670 champion run did (wseed -> ckpt + _best), instead of random init.
+    abs_ckpt = os.path.join(ROOT, ckpt_path)
+    if cfg.seed_ckpt and not os.path.exists(abs_ckpt):
+        seed_abs = os.path.join(ROOT, cfg.seed_ckpt)
+        if os.path.exists(seed_abs):
+            import shutil
+            shutil.copyfile(seed_abs, abs_ckpt)
+            shutil.copyfile(seed_abs, abs_ckpt.replace(".pt", "_best.pt"))
     log = open(os.path.join(ROOT, "data", "train.log"), "w")
     # ACTUALLY detach on Windows: without flags the trainer is a plain child of the server and dies with
     # it (a server restart killed a live run). CREATE_NO_WINDOW gives the trainer its OWN windowless
@@ -312,6 +331,26 @@ def api_train_start(cfg: TrainReq):
                                   creationflags=flags)
     with open(TRAIN_PID_FILE, "w") as fh:
         fh.write(str(TRAIN_PROC.pid))
+    if cfg.post_rung_depth > 0 and cfg.algo != "ac":
+        import threading
+
+        def _post_rung(proc, best_ckpt, depth, games, lineage):
+            # :Replication-bridge: step 2 — when training exits, the banked best sits the
+            # deep-search exam automatically (claims_rung.py -> rl_trend.jsonl), so the
+            # ladder plot and Champion tile move without a manual step. Dies with the
+            # server process (documented): re-run manually if the server restarted mid-run.
+            proc.wait()
+            if not os.path.exists(best_ckpt):
+                return
+            with open(os.path.join(ROOT, "data", "post_rung.log"), "a") as lg:
+                subprocess.run([PY, "claims_rung.py", best_ckpt, str(depth), str(games),
+                                f"{lineage or 'default'} d{depth} auto-rung"],
+                               cwd=ROOT, stdout=lg, stderr=subprocess.STDOUT)
+
+        threading.Thread(target=_post_rung,
+                         args=(TRAIN_PROC, abs_ckpt.replace(".pt", "_best.pt"),
+                               cfg.post_rung_depth, cfg.post_rung_games, cfg.lineage),
+                         daemon=True).start()
     return {"ok": True, "pid": TRAIN_PROC.pid}
 
 
@@ -436,12 +475,15 @@ PAGE = r"""<!doctype html>
       <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" checked style="width:auto"></div>
       <div><label>pargen threads</label><input id="pargen_threads" type="number" value="12" min="1"></div>
       <div><label>proxy games / sample</label><input id="proxy_games" type="number" value="4" min="0"></div>
-      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="grad1600"></div>
+      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="rep1"></div>
       <div><label>Elo surprise (M14)</label><input id="surprise" type="checkbox" style="width:auto"></div>
       <div><label>GRPO group adv (M15)</label><input id="grpo" type="checkbox" style="width:auto"></div>
       <div><label>replay temperature (0=off)</label><input id="replay_t" type="number" step="0.05" value="0"></div>
       <div><label>surprise K (Elo)</label><input id="surprise_k" type="number" step="1" value="32"></div>
       <div><label>magic deck (games, 0=off)</label><input id="deck" type="number" value="0" min="0"></div>
+      <div><label>seed ckpt (fresh lineage)</label><input id="seed_ckpt" type="text" value="models/qlearn_wseed.pt"></div>
+      <div><label>post-run ladder depth (0=off)</label><input id="post_rung_depth" type="number" value="9" min="0"></div>
+      <div><label>post-run ladder games</label><input id="post_rung_games" type="number" value="60" min="2"></div>
     </div>
     <div class="row">
       <button class="alt" onclick="loadBest()">⬇ Load Optuna best</button>
@@ -529,7 +571,9 @@ async function startTrain(){
     trivium_warmup:+val('trivium_warmup'),pargen:document.getElementById('pargen').checked?1:0,
     pargen_threads:+val('pargen_threads'),proxy_games:+val('proxy_games'),lineage:val('lineage'),
     surprise:document.getElementById('surprise').checked,grpo:document.getElementById('grpo').checked,
-    replay_t:+val('replay_t'),surprise_k:+val('surprise_k'),deck:+val('deck')};
+    replay_t:+val('replay_t'),surprise_k:+val('surprise_k'),deck:+val('deck'),
+    seed_ckpt:val('seed_ckpt'),post_rung_depth:+val('post_rung_depth'),
+    post_rung_games:+val('post_rung_games')};
   const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   const j=await r.json();
   document.getElementById('status').textContent=j.ok?`training started (pid ${j.pid})`:('busy: '+j.msg);
