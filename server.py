@@ -406,7 +406,7 @@ PAGE = r"""<!doctype html>
       <div><label>λ (trace)</label><input id="lam" type="number" step="0.01" value="0.8"></div>
       <div><label>warmup ratio (τ)</label><input id="warmup" type="number" step="0.01" value="0.4"></div>
       <div><label>warmup ratio (λ)</label><input id="lam_warmup" type="number" step="0.01" value="0.4"></div>
-      <div><label>sample size (games/epoch)</label><input id="epoch_games" type="number" value="200"></div>
+      <div><label>sample size (games/epoch)</label><input id="epoch_games" type="number" value="1000"></div>
       <div><label>max epochs (runs)</label><input id="max_epochs" type="number" value="30"></div>
       <div><label>patience</label><input id="patience" type="number" value="4"></div>
       <div><label>Elo games (final)</label><input id="elo_games" type="number" value="20"></div>
@@ -419,24 +419,24 @@ PAGE = r"""<!doctype html>
       <div><label>anchor to best (gate)</label><input id="anchor" type="checkbox" checked style="width:auto"></div>
       <div><label>TDLeaf(λ) search-gen (M5)</label><input id="tdleaf" type="checkbox" checked style="width:auto"></div>
       <div><label>opponents (M5)</label><select id="opp" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="self">self-play</option><option value="graded" selected>graded ladder</option></select></div>
+        <option value="self" selected>self-play</option><option value="graded">graded ladder</option></select></div>
       <div><label>encoding (M6)</label><select id="enc" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="pst" selected>pst 769</option><option value="kc">kc features 809</option></select></div>
+        <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option></select></div>
 
       <div><label>adaptive λ</label><input id="adaptive" type="checkbox" checked style="width:auto"></div>
       <div><label>KC faithful (M7)</label><input id="kc_faithful" type="checkbox" checked style="width:auto"></div>
       <div><label>RAMP filter (M7)</label><input id="ramp" type="checkbox" checked style="width:auto"></div>
       <div><label>confirmed crowns</label><input id="confirm" type="checkbox" checked style="width:auto"></div>
-      <div><label>native search depth (M8, 0=off)</label><input id="rsearch_depth" type="number" value="0" min="0"></div>
-      <div><label>native module</label><input id="rsearch_mod" type="text" value="rsearch3"></div>
-      <div><label>ZCA (path, empty=off)</label><input id="zca" type="text" value=""></div>
+      <div><label>native search depth (M8, 0=off)</label><input id="rsearch_depth" type="number" value="2" min="0"></div>
+      <div><label>native module</label><input id="rsearch_mod" type="text" value="rsearch4"></div>
+      <div><label>ZCA (path, empty=off)</label><input id="zca" type="text" value="models/zca.npz"></div>
       <div><label>trivium start "λ,search,outcome"</label><input id="trivium" type="text" value="0.285,0.341,0.374"></div>
       <div><label>trivium end (anneal)</label><input id="trivium_end" type="text" value="0.516,0.341,0.143"></div>
       <div><label>trivium warmup</label><input id="trivium_warmup" type="number" step="0.001" value="0.481"></div>
-      <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" style="width:auto"></div>
+      <div><label>parallel native gen (M9)</label><input id="pargen" type="checkbox" checked style="width:auto"></div>
       <div><label>pargen threads</label><input id="pargen_threads" type="number" value="12" min="1"></div>
       <div><label>proxy games / sample</label><input id="proxy_games" type="number" value="4" min="0"></div>
-      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="p7"></div>
+      <div><label>lineage (ckpt name)</label><input id="lineage" type="text" value="grad1600"></div>
       <div><label>Elo surprise (M14)</label><input id="surprise" type="checkbox" style="width:auto"></div>
       <div><label>GRPO group adv (M15)</label><input id="grpo" type="checkbox" style="width:auto"></div>
       <div><label>replay temperature (0=off)</label><input id="replay_t" type="number" step="0.05" value="0"></div>
