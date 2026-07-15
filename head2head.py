@@ -71,6 +71,20 @@ def evaluator_from_spec(spec):
             return np.where(X[:, 1536] > 0.5, out, -out).astype(np.float64)
 
         return vf, enc
+    if spec.startswith("enc:"):
+        # any registered encoder + its pst-family linear/mlp ckpt: 'enc:<name>:<ckpt>'
+        _, enc_name, ckpt = spec.split(":", 2)
+        from encoders import get as enc_get
+        enc_fn, nin = enc_get(enc_name)
+        ck = torch.load(ckpt, map_location="cpu")
+        net = ValueNet(ck.get("arch", "linear"), 64, nin)
+        net.load_state_dict(ck["state_dict"]); net.eval()
+
+        def vf(X, _n=net):
+            with torch.no_grad():
+                return _n(torch.from_numpy(X)).numpy().reshape(-1)
+
+        return vf, enc_fn
     if spec.startswith("kcz:"):
         from corpus_gen import raw_weights
         from cem_loop import encode_features

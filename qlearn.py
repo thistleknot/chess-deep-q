@@ -94,82 +94,11 @@ ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 p
 # overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
 # -> part of every checkpoint and study identity. nk is python-only: no native searcher eval
 # (set QLEARN_RSEARCH_DEPTH=0, PARGEN=0; TDLeaf targets come from the python beam search).
-if ENC == "hk":
-    from kanerva_enc import active5k, K_IN as NIN_ENC
-    def ENC_FN(board, _a=active5k, _n=NIN_ENC):   # round 2 S7/S8: the 5121 paper set AS ITSELF
-        # _n bound at DEF time: the ZCA/PCA wrap rebinds global NIN_ENC to the reduced dim
-        # (512 for pca5k) — late-binding here built a 512 vector for 5121 indices (IndexError)
-        x = np.zeros(_n, dtype=np.float32)
-        x[_a(board)] = 1.0
-        return x
-elif ENC == "kx":
-    from kanerva_enc import encode_kanerva809 as _kx8
-    NIN_ENC = 809 + 2048                   # round 2 S9: 809 ⊕ conjunctions (expansion ON TOP)
-    def ENC_FN(board, _k=_kx8, _e=encode_features):
-        x = _e(board)
-        return np.concatenate([x, _k(x)])
-elif ENC == "k8":
-    from kanerva_enc import encode_kanerva809 as _k8
-    from kanerva_enc import K8_OUT as NIN_ENC
-    def ENC_FN(board, _k=_k8, _e=encode_features):    # :Kanerva-809: expansion (bake set 5)
-        return _k(_e(board))
-elif ENC == "tpst":
-    NIN_ENC = NIN + 2 * 768                # Merge 21 :Threat-planes:: pst-769 base ⊕ the
-    # operator's highlight-engine semantics as feature INTERACTIONS (piece × square ×
-    # threatened / × guarded). Hand feature defs only — no piece values anywhere; the
-    # objective prices the conjunctions (operator design 2026-07-14).
-    def ENC_FN(board, _e=encode, _n=NIN):
-        x = np.zeros(_n + 2 * 768, dtype=np.float32)
-        x[:_n] = _e(board)
-        for sq, piece in board.piece_map().items():
-            idx = (0 if piece.color == chess.WHITE else 384) + 64 * (piece.piece_type - 1) + sq
-            if board.is_attacked_by(not piece.color, sq):
-                x[_n + idx] = 1.0                        # this piece, this square, THREATENED
-            if board.is_attacked_by(piece.color, sq):
-                x[_n + 768 + idx] = 1.0                  # ... GUARDED
-        return x
-elif ENC == "hpst":
-    NIN_ENC = NIN + 768                    # Merge 21 arm B :Hanging-planes:: TRIZ nesting —
-    # piece × square × (THREATENED AND NOT GUARDED). The fork-blindness conjunction.
-    def ENC_FN(board, _e=encode, _n=NIN):
-        x = np.zeros(_n + 768, dtype=np.float32)
-        x[:_n] = _e(board)
-        for sq, piece in board.piece_map().items():
-            if (board.is_attacked_by(not piece.color, sq)
-                    and not board.is_attacked_by(piece.color, sq)):
-                x[_n + (0 if piece.color == chess.WHITE else 384)
-                  + 64 * (piece.piece_type - 1) + sq] = 1.0
-        return x
-elif ENC == "amap":
-    NIN_ENC = NIN + 128                    # Merge 21 arm C :Attack-maps:: TRIZ universality —
-    # per-square any-attack binary per side (operator's mobility/space/center features as
-    # LEARNABLE maps: no hand square-weights; the objective prices d4 itself).
-    def ENC_FN(board, _e=encode, _n=NIN):
-        x = np.zeros(_n + 128, dtype=np.float32)
-        x[:_n] = _e(board)
-        for sq in chess.SQUARES:
-            if board.is_attacked_by(chess.WHITE, sq):
-                x[_n + sq] = 1.0
-            if board.is_attacked_by(chess.BLACK, sq):
-                x[_n + 64 + sq] = 1.0
-        return x
-elif ENC == "kpst":
-    NIN_ENC = 4 * NIN                      # Merge 20 :Kpst:: the pst-769 planes replicated per
-    # WHITE-king quadrant bucket (2x2: file-half x rank-half) — hand-declared king-conditioned
-    # feature def (NNUE-floor probe: 4 buckets is the practice floor; own-king only, black-king
-    # structure deliberately unmodeled at this rung). Active bucket carries the planes, others 0.
-    def ENC_FN(board, _e=encode, _n=NIN):  # _n bound at def time (hk lesson: ZCA wrap rebinds NIN_ENC)
-        x = _e(board)
-        k = board.king(chess.WHITE)
-        b = 2 * (chess.square_file(k) >= 4) + (chess.square_rank(k) >= 4)
-        out = np.zeros(4 * _n, dtype=np.float32)
-        out[b * _n:(b + 1) * _n] = x
-        return out
-elif ENC == "nk":
-    from kanerva_enc import encode_kanerva as ENC_FN, K_OUT as NIN_ENC
-else:
-    ENC_FN     = encode_features if ENC == "kc" else encode
-    NIN_ENC    = NFEAT if ENC == "kc" else NIN
+# Encoder registry lives in encoders.py (ONE home, shared with the duel ruler) — the
+# per-name definitions and their lessons (hk def-time binding, Merge-20/21 planes) moved
+# there verbatim. The ZCA/whitening wrap below still applies on top.
+from encoders import get as _enc_get
+ENC_FN, NIN_ENC = _enc_get(ENC)
 ZCA        = os.environ.get("QLEARN_ZCA", "")                  # E3 (purist capacity #1): path to
 # models/zca.npz -> train in the WHITENED space x' = Z(x - mu) (conditioning only, no capacity
 # change); native searcher gets back-converted raw weights (w_raw = Z w', b_raw = b' - w_raw·mu).
