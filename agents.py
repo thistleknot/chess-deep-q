@@ -31,11 +31,24 @@ def _puct_value_fn(net, dev):
     return v
 
 
-def make_agent(name="puct", playouts=160, engine_time=0.3):
+def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
     """Return (label, move_fn, value_fn). move_fn(board) -> a legal move (or None); value_fn may be
-    None. The default agent is the net+PUCT :Chess-RL-system: (the RL deliverable)."""
+    None. The default agent is the CHAMPION — the self-play RL net inside native alpha-beta d9,
+    claims-measured 1670 (95% 1605..1762) vs SF@1320 (spec/bullet-route.spec.md ladder)."""
     import torch
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if name == "champion":
+        path = "models/champion.pt"
+        if not os.path.exists(path):
+            print(f"{path} not found — promote a graduated net first (see spec/bullet-route.spec.md).")
+            return "champion", None, None
+        import importlib
+        from corpus_gen import raw_weights
+        w, b = raw_weights(path)                     # ZCA identity-gated 809 conversion
+        srch = importlib.import_module("rsearch4").Searcher(w, b)
+        return (f"champion(d{depth}, 1670-claims)",
+                (lambda bd: chess.Move.from_uci(srch.search(bd.fen(), depth)[0])),
+                (lambda bd: float(srch.score(bd.fen()))))
     if name == "puct":
         path = "models/tower_puct.pt"
         if not os.path.exists(path):
@@ -72,7 +85,7 @@ def make_agent(name="puct", playouts=160, engine_time=0.3):
         from play_beam import beam_mover
         label, mv = beam_mover(dev)
         return label, mv, None
-    raise ValueError(f"unknown agent '{name}' (puct | engine | beam | nnue)")
+    raise ValueError(f"unknown agent '{name}' (champion | puct | engine | beam | nnue)")
 
 
 class _ValueShim:

@@ -11,11 +11,12 @@ _PLAY_PLAYOUTS = 160          # :Difficulty-mode: strength dial → :Play-mode: 
 
 
 def _pick_agent():
-    """:Selectable-agent: — net+PUCT default; engine baseline; beam experimental; nnue deployed."""
-    print("\nAgent:  1. net+PUCT (RL agent, default)   2. alpha-beta engine (baseline)   "
-          "3. beam (experimental)   4. nnue (phi-widen :Deployed-agent:)")
-    c = input("Choose (1-4, default 1): ").strip() or "1"
-    return {"1": "puct", "2": "engine", "3": "beam", "4": "nnue"}.get(c, "puct")
+    """:Selectable-agent: — CHAMPION default (self-play RL net + native alpha-beta d9,
+    claims 1670); the earlier deliverables stay selectable."""
+    print("\nAgent:  1. CHAMPION (self-play RL + d9 search, 1670 claims — default)   "
+          "2. net+PUCT   3. alpha-beta engine (baseline)   4. beam   5. nnue (phi-widen)")
+    c = input("Choose (1-5, default 1): ").strip() or "1"
+    return {"1": "champion", "2": "puct", "3": "engine", "4": "beam", "5": "nnue"}.get(c, "champion")
 
 
 def play_mode():
