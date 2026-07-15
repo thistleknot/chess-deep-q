@@ -141,3 +141,19 @@ pipeline. Bridge (server.py, console):
 Bullet route graduates to step 2 (10× corpus) only if a bullet arm beats BOTH its
 teacher and the bullet-linear control beyond the duel band. Otherwise the graduated
 run goes to the best trainer-lane candidate (mlp volume lane vs volume-net incumbent).
+
+## Parked: :Backup-temperature: (operator concept 2026-07-14 — lambda between backup operators)
+
+Operator insight: blend minimax (max-backup) and MCTS (mean-backup) with a lambda, like
+eligibility traces blend n-step estimators. Canonical form: SOFT BACKUP — log-sum-exp /
+power-mean with temperature tau_b (tau_b->0 = minimax, ->inf = MC mean). Published:
+Power-UCT (Dam et al. IJCAI 2020), MENTS (Xiao et al. 2019). In-repo motivation: the
+TDLeaf maximization-bias collapse (max-backup amplifies eval error — measured); the
+trivium/Q8 blends (house pattern: anneal trust dials).
+- CHEAP test (pre-registered, fire on operator go after the SME-feature verdicts):
+  organ study — training TARGETS computed with tau_b-annealed soft-backup over the d2
+  beam values (mean-ish early, max-ish late), single knob, standard 3-trial protocol +
+  duel-ruler verdict vs the max-backup control. Organ base rate 0/5 — expectations set.
+- EXPENSIVE half (play-time hybrid backup on sparse trees): parked behind the standing
+  bar — must beat native d9 minimax at equal compute; requires native-side work either
+  way (the 1000x python/native throughput gap dominates any operator gain).
