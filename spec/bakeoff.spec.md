@@ -1,5 +1,29 @@
 # :Bake-off: — the feature-set / organ testing approach (operator method, spec'd)
 
+## :Replication-requirement: (operator-mandated 2026-07-14 — STANDING, applies to every experiment)
+
+An experiment result does not COUNT until the pipeline that produced it is replayable
+end-to-end from the UI/CLI by the operator, without agent-session steps.
+
+- **Require**: every graduated/claims result names its full recipe (seed artifact,
+  encoder, trainer knobs, generation mode, measurement depth+protocol) in a form the
+  console can launch — no knob may live only in a session command or an env
+  reconstruction.
+- **Guarantee**: the console Start flow reproduces the winning pipeline WHOLE:
+  seed-from-scratch (fresh lineage ← declared seed ckpt, never random init) → train →
+  bank best (confirmed-crown ratchet) → automatic deep-ladder measurement → result
+  posted to the ladder/tiles. (:Replication-bridge: in spec/bullet-route.spec.md is the
+  implementation; UI MUST be updated whenever a winning recipe adds a knob the form
+  lacks.)
+- **Maintain**: replication is RECIPE-level, not bit-level — RNG seeds/thread timing
+  may vary; the claim is that the protocol reproduces the result CLASS (crown band,
+  ladder band), judged by the usual CI overlap.
+- **Assert**: before any result is recorded as a record/claim, check: could the
+  operator hit Load-config → Start and retrace it? If no, the missing knob/step is a
+  DEFECT to fix before the claim is logged. (Instance that forced this rule: the 1670
+  champion — seed step and d9 measurement initially lived outside the button.)
+
+
 The standing procedure for choosing between CANDIDATE COMPONENTS (feature encodings,
 mechanism "organs", architectures): parallel 3-trial Optuna studies, one candidate per
 study, everything else pinned to the organ-free baseline. Optuna is the judge ("optuna
