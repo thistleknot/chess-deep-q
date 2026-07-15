@@ -42,11 +42,17 @@ SEED0 = 977
 
 
 def raw_weights(ckpt=None):
-    """(w_raw, b_raw) in 809 space, identity-gated against the whitened net."""
+    """(w_raw, b_raw) in native-eval space: kc-809 (identity-gated through ZCA when the
+    ckpt is whitened) or amap-897 (:Native-amap-port: 2026-07-15 — the confirmed
+    feature winner rides rsearch4 v3.7 directly; amap lineages train unwhitened)."""
     ck = torch.load(ckpt or CKPT, map_location="cpu")
-    assert ck.get("enc") == "kc" and ck.get("arch", "linear") == "linear", ck.get("enc")
+    assert ck.get("enc") in ("kc", "amap") and ck.get("arch", "linear") == "linear", ck.get("enc")
     w = ck["state_dict"]["head.weight"].numpy().reshape(-1).astype(np.float64)
     b = float(ck["state_dict"]["head.bias"].numpy().reshape(-1)[0])
+    if ck.get("enc") == "amap":
+        assert not ck.get("zca"), "amap lineages are unwhitened (no 897-dim ZCA exists)"
+        assert w.size == 897, w.size
+        return list(w), b
     if not ck.get("zca"):
         return list(w), b
     battery = [chess.Board(),

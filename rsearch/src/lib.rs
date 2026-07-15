@@ -11,6 +11,8 @@ use cozy_chess::{
 use pyo3::prelude::*;
 
 const NFEAT: usize = 809;
+const NAMAP: usize = 897; // amap encoder (encoders._amap): [0:769] pst planes+stm,
+                          // [769:833] white-attacked squares, [833:897] black-attacked
 const TYPE_VAL: [f64; 6] = [1.0, 3.0, 3.0, 5.0, 9.0, 0.0]; // P N B R Q K
 
 fn bb_u64(bb: BitBoard) -> u64 {
@@ -52,12 +54,13 @@ fn front_span(white: bool, sq: usize) -> u64 {
 }
 
 struct Eval {
-    w: [f64; NFEAT],
+    w: Vec<f64>,   // len NFEAT (kc-809) or NAMAP (amap-897) — mode = length
     bias: f64,
 }
 
 impl Eval {
-    /// White-absolute pre-tanh linear score; feature semantics == cem_loop.encode_features.
+    /// White-absolute pre-tanh linear score; feature semantics == cem_loop.encode_features
+    /// (809 weights) or encoders._amap (897 weights — the confirmed feature winner).
     fn score(&self, board: &Board) -> f64 {
         let occ_w = bb_u64(board.colors(Color::White));
         let occ_b = bb_u64(board.colors(Color::Black));
@@ -116,6 +119,19 @@ impl Eval {
                 a |= bb_u64(get_king_moves(Square::index(k.trailing_zeros() as usize)));
             }
             atk[side] = a;
+        }
+        if self.w.len() == NAMAP {
+            // amap mode: per-square any-attack bits per side — python parity:
+            // board.is_attacked_by(color, sq) == union of that side's piece attacks
+            for side in 0..2 {
+                let mut m = atk[side];
+                while m != 0 {
+                    let sq = m.trailing_zeros() as usize;
+                    s += self.w[769 + 64 * side + sq];
+                    m &= m - 1;
+                }
+            }
+            return s;
         }
         for side in 0..2 {
             let opp = 1 - side;
@@ -474,16 +490,15 @@ struct Searcher {
 impl Searcher {
     #[new]
     fn new(weights: Vec<f64>, bias: f64) -> PyResult<Self> {
-        if weights.len() != NFEAT {
+        if weights.len() != NFEAT && weights.len() != NAMAP {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "expected {} weights, got {}",
+                "expected {} (kc) or {} (amap) weights, got {}",
                 NFEAT,
+                NAMAP,
                 weights.len()
             )));
         }
-        let mut w = [0.0; NFEAT];
-        w.copy_from_slice(&weights);
-        Ok(Searcher { eval: Eval { w, bias }, tt: vec![TtEntry::default(); TT_SIZE] })
+        Ok(Searcher { eval: Eval { w: weights, bias }, tt: vec![TtEntry::default(); TT_SIZE] })
     }
 
     /// White-absolute pre-tanh score of a FEN (parity testing)
@@ -730,15 +745,14 @@ fn play_games(
     seed: u64,
     tau: f64,
 ) -> PyResult<Vec<(f64, bool, Vec<(String, f64, bool)>)>> {
-    if weights.len() != NFEAT || opp_weights.len() != NFEAT {
-        return Err(pyo3::exceptions::PyValueError::new_err("weights must be 809-dim"));
+    for wl in [weights.len(), opp_weights.len()] {
+        if wl != NFEAT && wl != NAMAP {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "weights must be 809-dim (kc) or 897-dim (amap)"));
+        }
     }
-    let mut wa = [0.0; NFEAT];
-    wa.copy_from_slice(&weights);
-    let mut wo = [0.0; NFEAT];
-    wo.copy_from_slice(&opp_weights);
-    let agent = Eval { w: wa, bias };
-    let opp = Eval { w: wo, bias: opp_bias };
+    let agent = Eval { w: weights, bias };
+    let opp = Eval { w: opp_weights, bias: opp_bias };
     let results = py.allow_threads(|| {
         let agent = &agent;
         let opp = &opp;
@@ -772,7 +786,7 @@ fn play_games(
 
 #[pyfunction]
 fn version() -> &'static str {
-    "v3.6-softmax-tau"
+    "v3.7-amap"
 }
 
 #[pymodule]

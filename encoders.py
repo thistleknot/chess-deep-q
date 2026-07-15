@@ -55,6 +55,21 @@ def _amap(board, _e=encode, _n=NIN):
     return x
 
 
+def _amaph(board, _a=_amap, _n=NIN):
+    # Merge 21 :Composition-arm: (fires on the amap CONFIRMED verdict, 2026-07-15):
+    # amap (897d, the confirmed winner) ⊕ hanging planes (768d, the leaning-tie arm B) —
+    # tests whether hanging-piece conjunctions add on TOP of coverage maps
+    x = np.zeros(_n + 128 + 768, dtype=np.float32)
+    x[:_n + 128] = _a(board)
+    off = _n + 128
+    for sq, piece in board.piece_map().items():
+        if (board.is_attacked_by(not piece.color, sq)
+                and not board.is_attacked_by(piece.color, sq)):
+            x[off + (0 if piece.color == chess.WHITE else 384)
+              + 64 * (piece.piece_type - 1) + sq] = 1.0
+    return x
+
+
 def _kpst(board, _e=encode, _n=NIN):
     # Merge 20 :Kpst:: pst-769 planes per WHITE-king quadrant (file-half × rank-half)
     x = _e(board)
@@ -77,6 +92,8 @@ def get(name):
         return _hpst, NIN + 768
     if name == "amap":
         return _amap, NIN + 128
+    if name == "amaph":
+        return _amaph, NIN + 128 + 768
     if name == "kpst":
         return _kpst, 4 * NIN
     if name == "hk":
@@ -101,4 +118,4 @@ def get(name):
         from kanerva_enc import encode_kanerva, K_OUT
         return encode_kanerva, K_OUT
     raise ValueError(f"unknown encoder '{name}' "
-                     "(pst | kc | tpst | hpst | amap | kpst | hk | kx | k8 | nk)")
+                     "(pst | kc | tpst | hpst | amap | amaph | kpst | hk | kx | k8 | nk)")

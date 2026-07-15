@@ -26,6 +26,11 @@ from pydantic import BaseModel
 
 app = FastAPI()
 ROOT = os.path.dirname(os.path.abspath(__file__))
+try:
+    import lane as _lane
+    _lane.reap(kill=False, quiet=True)   # :Lane-registry: — console never coexists with zombies
+except Exception:
+    _lane = None
 TREND = os.path.join(ROOT, "data", "rl_trend.jsonl")
 METRICS = os.path.join(ROOT, "data", "qlearn_metrics.jsonl")
 RESULTS = os.path.join(ROOT, "data", "qlearn_results.jsonl")
@@ -435,6 +440,19 @@ def api_train_stop():
     return {"ok": True, "msg": f"terminated tree (pid {pid})"}
 
 
+@app.get("/api/lanes")
+def api_lanes():
+    """:Lane-registry: live runs + measured ETAs for the console Lanes tile."""
+    if _lane is None:
+        return {"lanes": []}
+    try:
+        import importlib
+        importlib.reload(_lane)
+        return {"lanes": _lane.api_rows()}
+    except Exception as e:
+        return {"lanes": [], "error": str(e)}
+
+
 @app.get("/api/train/status")
 def api_train_status():
     pid = _active_pid()
@@ -524,7 +542,7 @@ PAGE = r"""<!doctype html>
       <div><label>opponents (M5)</label><select id="opp" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
         <option value="self" selected>self-play</option><option value="graded">graded ladder</option></select></div>
       <div><label>encoding (M6)</label><select id="enc" style="width:100%;background:#0d1117;border:1px solid #30363d;color:#e6edf3;border-radius:6px;padding:7px">
-        <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option></select></div>
+        <option value="pst">pst 769</option><option value="kc" selected>kc features 809</option><option value="amap">amap 897 (confirmed feature win — native v3.7)</option></select></div>
 
       <div><label>adaptive λ</label><input id="adaptive" type="checkbox" checked style="width:auto"></div>
       <div><label>KC faithful (M7)</label><input id="kc_faithful" type="checkbox" checked style="width:auto"></div>
@@ -568,6 +586,7 @@ PAGE = r"""<!doctype html>
       <div class="tile"><div class="k">λ (adapted)</div><div class="v" id="t-lam">—</div></div>
       <div class="tile"><div class="k">Buffer</div><div class="v" id="t-buf">—</div></div>
       <div class="tile"><div class="k">Opponent rung (graded)</div><div class="v" id="t-rung">—</div></div>
+      <div class="tile"><div class="k">Lanes (live runs)</div><div class="v" id="t-lanes" style="font-size:.72em;line-height:1.5">idle</div></div>
     </div>
     <div class="plots">
       <div class="plot"><h3>score vs SF@1320 (nominal pts) <span class="now" id="n-sfpts"></span></h3><svg id="p-sfpts"></svg></div>
@@ -817,5 +836,20 @@ async function pollLadder(){
   setTimeout(pollLadder,10000);
 }
 pollLadder();
+async function pollLanes(){
+  try{
+    const r=await fetch('/api/lanes'); const d=await r.json();
+    const el=document.getElementById('t-lanes');
+    if(!d.lanes||!d.lanes.length){ el.textContent='idle'; }
+    else{
+      el.innerHTML=d.lanes.map(l=>{
+        const eta=l.eta_s!=null?` ~${Math.floor(l.eta_s/60)}m${String(l.eta_s%60).padStart(2,'0')}s`:'';
+        return `${esc(l.tag)} [${esc(l.cores||'all')}]${l.alive?eta||' running':' STALE'}`;
+      }).join('<br>');
+    }
+  }catch(e){}
+  setTimeout(pollLanes,10000);
+}
+pollLanes();
 </script>
 </body></html>"""

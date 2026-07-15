@@ -177,12 +177,123 @@ def wilson(p, n, z=1.96):
     return (c - e) / d, (c + e) / d
 
 
+def _snapshot_spec(spec, run_dir):
+    """:Input-snapshot: — copy every file-path token of a mover spec into run_dir and
+    point the spec at the frozen copies, so a concurrent trainer writing the source
+    ckpt can NEVER touch a running duel (the 2026-07-15 zombie-retrain contamination
+    class). Returns (snapped_spec, tags) with tags like ["name.pt#sha8"] for the
+    verdict line. Failure mode: absolute Windows paths with drive colons are not
+    split-safe — duel specs use repo-relative paths by convention."""
+    import hashlib
+    import shutil
+    parts = [spec] if os.path.isfile(spec) else spec.split(":")
+    tags = []
+    for i, tok in enumerate(parts):
+        if tok and os.path.isfile(tok):
+            os.makedirs(run_dir, exist_ok=True)
+            dst = os.path.join(run_dir, os.path.basename(tok))
+            shutil.copy2(tok, dst)
+            with open(dst, "rb") as fh:
+                h = hashlib.sha1(fh.read()).hexdigest()[:8]
+            tags.append(f"{os.path.basename(tok)}#{h}")
+            parts[i] = dst
+    return ":".join(parts), tags
+
+
+def _shard(args):
+    """One parallel worker's slice: `pairs` paired openings x 2 colors, movers rebuilt
+    in-process from the specs, openings drawn from a shard-DISJOINT rng (seed offset) so
+    no two shards replay the same deterministic games. Returns (score, decisive)."""
+    a_spec, b_spec, pairs, seed, shard = args
+    try:
+        import torch
+        torch.set_num_threads(1)               # one core per worker; search dominates
+    except Exception:
+        pass
+    rng = random.Random(seed)
+    A, B = mover_from_spec(a_spec, rng), mover_from_spec(b_spec, rng)
+    score = decisive = 0.0
+    for opening in make_openings(pairs, rng):
+        for a_white in (True, False):
+            s = duel_game(A if a_white else B, B if a_white else A, opening)
+            score += s if a_white else 1.0 - s
+            decisive += (s != 0.5)
+    print(f"  shard {shard}: {2 * pairs}g done, A score {score / (2 * pairs):.3f}", flush=True)
+    return score, decisive
+
+
 def main():
+    from thermal import engage
+    engage()                    # :Thermal-guard: — cap cores/priority, children inherit
     a_path, b_path = sys.argv[1], sys.argv[2]
     games = (int(sys.argv[3]) if len(sys.argv) > 3 else 300) // 2 * 2
+    # :Games-cap: (operator law 2026-07-15): "explorations with 20, full run with 50,
+    # that's it — if you are just trying to measure elo, 50 is sufficient." The cap
+    # clamps ANY requested games count; going past it requires the operator explicitly
+    # setting H2H_CAP. Verdict lines always print the 95% band, so a 50g verdict
+    # honestly carries its ~±97 Elo resolution.
+    games = min(games, max(2, int(os.environ.get("H2H_CAP", "50")) // 2 * 2))
     tag = sys.argv[4] if len(sys.argv) > 4 else "adhoc"
+    run_dir = os.path.join("data", "runs", tag)
+    a_snap, a_tags = _snapshot_spec(a_path, run_dir)   # :Input-snapshot: — movers load
+    b_snap, b_tags = _snapshot_spec(b_path, run_dir)   # frozen copies, never live files
+    intag = " | in " + " ".join(a_tags + b_tags) if (a_tags or b_tags) else ""
+    # :Sharded-duel: + :Group-sequential: (operator 2026-07-15 — "cap the games at no
+    # more than 50"): games are independent at fixed depth (no clocks -> contention
+    # cannot bias them), so each 50-game BLOCK fans out over H2H_SHARDS workers, and the
+    # duel STOPS at the earliest block with an answer:
+    #   - stop WIN/LOSS: interim band (z=2.29, Pocock bound for repeated looks) excludes 0
+    #   - stop TIE (futility): >=300 games, band contains 0, |point| < 15 Elo
+    #   - hard cap: the games argument (spend past 50 happens ONLY while inconclusive)
+    # Paired openings preserved within shards; disjoint rng streams per (round, shard).
+    # H2H_SHARDS=1 recovers the serial path exactly as before.
+    shards = max(1, int(os.environ.get("H2H_SHARDS", "6")))
+    if shards > 1:
+        block = max(2, int(os.environ.get("H2H_BLOCK", "50"))) // 2 * 2
+        import multiprocessing as mp
+        score = decisive = 0.0
+        played = 0
+        stop = ""
+        print(f"h2h {tag}: blocks of {block}g x {shards} shards, cap {games}g, "
+              f"sequential stop", flush=True)
+        with mp.Pool(shards) as pool:
+            for rnd in range(max(1, games // block)):
+                pairs = min(block, games - played) // 2
+                if pairs <= 0:
+                    break
+                split = [pairs // shards + (1 if k < pairs % shards else 0)
+                         for k in range(shards)]
+                jobs = [(a_snap, b_snap, n, SEED + 1000 * (rnd * 64 + k + 1), k)
+                        for k, n in enumerate(split) if n]
+                parts = pool.map(_shard, jobs)
+                score += sum(p_[0] for p_ in parts)
+                decisive += sum(p_[1] for p_ in parts)
+                played += 2 * pairs
+                pi_ = score / played
+                ilo, ihi = wilson(pi_, played, z=2.29)
+                e_pt = elo_diff(pi_, played)
+                print(f"  block {rnd + 1}: {played}g, A score {pi_:.3f} | interim Elo "
+                      f"{e_pt:+.0f} ({elo_diff(ilo, played):+.0f}..{elo_diff(ihi, played):+.0f})",
+                      flush=True)
+                if ilo > 0.5 or ihi < 0.5:
+                    stop = f" [early stop: band excludes zero @ {played}g]"
+                    break
+                if played >= 300 and abs(e_pt) < 15:
+                    stop = f" [futility stop: tie @ {played}g]"
+                    break
+        p = score / played
+        lo, hi = wilson(p, played)
+        e, el, eh = elo_diff(p, played), elo_diff(lo, played), elo_diff(hi, played)
+        line = (f"h2h {tag}: A={os.path.basename(a_path)} vs B={os.path.basename(b_path)} | "
+                f"{played}g score {p:.3f} -> Elo {e:+.0f} (95% {el:+.0f}..{eh:+.0f}) | "
+                f"decisive {decisive / played:.0%}{stop}{intag}")
+        print(line)
+        os.makedirs("data", exist_ok=True)
+        with open(f"data/h2h_{tag}.md", "a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+        return
     rng = random.Random(SEED)
-    A, B = mover_from_spec(a_path, rng), mover_from_spec(b_path, rng)
+    A, B = mover_from_spec(a_snap, rng), mover_from_spec(b_snap, rng)
     score = decisive = 0.0
     for i, opening in enumerate(make_openings(games // 2, rng)):
         for a_white in (True, False):
@@ -191,13 +302,22 @@ def main():
             score += sa
             decisive += (s != 0.5)
         if (i + 1) % 25 == 0:
-            print(f"  ...{2 * (i + 1)}/{games} games, A score {score / (2 * (i + 1)):.3f}", flush=True)
+            # :Interim-band: — running Wilson band at every checkpoint. Repeated looks
+            # inflate type-I error, so interim bands use z=2.29 (Pocock-style bound);
+            # ONLY the final 95% band is the pre-registered verdict.
+            gp = 2 * (i + 1)
+            pi_ = score / gp
+            ilo, ihi = wilson(pi_, gp, z=2.29)
+            print(f"  ...{gp}/{games} games, A score {pi_:.3f} | interim Elo "
+                  f"{elo_diff(pi_, gp):+.0f} ({elo_diff(ilo, gp):+.0f}..{elo_diff(ihi, gp):+.0f})"
+                  + ("  [interim band excludes zero]" if ilo > 0.5 or ihi < 0.5 else ""),
+                  flush=True)
     p = score / games
     lo, hi = wilson(p, games)
     e, el, eh = elo_diff(p, games), elo_diff(lo, games), elo_diff(hi, games)
     line = (f"h2h {tag}: A={os.path.basename(a_path)} vs B={os.path.basename(b_path)} | "
             f"{games}g score {p:.3f} -> Elo {e:+.0f} (95% {el:+.0f}..{eh:+.0f}) | "
-            f"decisive {decisive / games:.0%}")
+            f"decisive {decisive / games:.0%}{intag}")
     print(line)
     os.makedirs("data", exist_ok=True)
     with open(f"data/h2h_{tag}.md", "a", encoding="utf-8") as fh:

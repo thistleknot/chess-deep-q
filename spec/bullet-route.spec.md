@@ -142,18 +142,59 @@ Bullet route graduates to step 2 (10× corpus) only if a bullet arm beats BOTH i
 teacher and the bullet-linear control beyond the duel band. Otherwise the graduated
 run goes to the best trainer-lane candidate (mlp volume lane vs volume-net incumbent).
 
-## Parked: :Backup-temperature: (operator concept 2026-07-14 — lambda between backup operators)
+## :Thermal-guard: (operator 2026-07-15 — mid-claims-run thermal reboot)
+
+Every hours-long lane self-caps at entry: `thermal.engage()` = half the logical
+cores (affinity, inherited by children incl. Stockfish) + below-normal priority +
+matched torch thread pool. Wired into `claims_rung.py`, `head2head.py`,
+`qlearn.py` mains. Override: `CHESS_THERMAL_FRACTION` (0..1), `CHESS_THERMAL_OFF=1`.
+Guarantee: the operator's foreground use always preempts a lane; a lane never
+holds 100% of the package for hours. The guard is operational only — it must
+never change results, only wall-clock.
+
+## :Factorial-tournament: (operator 2026-07-15 — "sport like tournaments")
+
+Operator design: test lanes SEPARATELY then in COMBINATION — a 2x2 factorial
+{base pst, amap features} x {max backup, soft backup tau_hi=0.5}, all SEED=1 s200
+matched protocol, settled by ROUND-ROBIN (every net duels every net, 50g/pairing
+per the games-cap law, standings table = the verdict artifact). Cells: base+max =
+arm5_pst_b, base+soft = arm5_sb_b (tie head-to-head vs base+max), amap+max =
+arm5_amap_b (confirmed winner), amap+soft = arm5_amapsb_b (TRAINING). amaph
+(composition) joins the bracket when its verdict posts. Key question: does the
+operator's backup-lambda pay ON TOP of the confirmed features (interaction),
+even though it tied on the weak base? Caveat declared: 50g pairings resolve ~±95;
+standings read as trends, each net's pooled 4-match record (200g) tightens its
+overall read.
+
+VERDICT (2026-07-15): tournament winner amap+soft (seed-1: +108 (+8..+207) over
+amap, band excludes zero) FAILED seed-2 confirmation: -35 (-130..+61), point-sign
+flip; pooled 100g = +35 (-33..+103) spans zero => per pre-registration the stack
+is UNCONFIRMED (likely seed-1 luck; mechanism base rate 0/7). amap alone stays
+the only confirmed winner and the native-port payload. :Backup-temperature:
+remains implemented + flags-off; reopening = explicit operator ask at a finer
+H2H_CAP resolution.
+
+## :Backup-temperature: (operator concept 2026-07-14 — lambda between backup operators; IMPLEMENTED 2026-07-15, cheap-test QUEUED)
 
 Operator insight: blend minimax (max-backup) and MCTS (mean-backup) with a lambda, like
 eligibility traces blend n-step estimators. Canonical form: SOFT BACKUP — log-sum-exp /
 power-mean with temperature tau_b (tau_b->0 = minimax, ->inf = MC mean). Published:
-Power-UCT (Dam et al. IJCAI 2020), MENTS (Xiao et al. 2019). In-repo motivation: the
-TDLeaf maximization-bias collapse (max-backup amplifies eval error — measured); the
-trivium/Q8 blends (house pattern: anneal trust dials).
-- CHEAP test (pre-registered, fire on operator go after the SME-feature verdicts):
-  organ study — training TARGETS computed with tau_b-annealed soft-backup over the d2
-  beam values (mean-ish early, max-ish late), single knob, standard 3-trial protocol +
-  duel-ruler verdict vs the max-backup control. Organ base rate 0/5 — expectations set.
+Power-UCT (Dam et al. IJCAI 2020), MENTS (Xiao et al. 2019); the tau_b operator used is
+MELLOWMAX (Asadi & Littman 2017 — mean at tau->inf without the log-n divergence). In-repo
+motivation: the TDLeaf maximization-bias collapse (max-backup amplifies eval error —
+measured); the trivium/Q8 blends (house pattern: anneal trust dials).
+- IMPLEMENTATION: `QLEARN_SOFT_BACKUP=<tau_hi>` (0=OFF, flags-off-inert PROVEN on a
+  3-position battery + 3-value-set mellowmax limit battery). gv in search_policy.
+  search_move (python d2 beam TDLeaf path ONLY — asserts RSEARCH_DEPTH=0) becomes
+  mellowmax over the BACKED root values; tau_b anneals tau_hi -> 0 on the shared
+  :anneal:/WARMUP schedule (mean-ish early, max late — the trace analogy). Move
+  CHOICE untouched; only the bootstrap value changes.
+- CHEAP test VERDICT (2026-07-15): arm5_sb_b (SEED=1, s200, tau_hi=0.5) vs matched
+  max-backup control arm5_pst_b — **50g score 0.500 -> +0 Elo (95% -95..+95): no
+  detectable effect at the operator's 50g spend** (games-cap law; effects < ~±95
+  invisible at this resolution). Trained stably, 96% decisive. CLOSED at one trial
+  per pre-registration; re-opening at a finer resolution requires an explicit
+  operator H2H_CAP raise. Organ base rate now 0/6.
 - EXPENSIVE half (play-time hybrid backup on sparse trees): parked behind the standing
   bar — must beat native d9 minimax at equal compute; requires native-side work either
   way (the 1000x python/native throughput gap dominates any operator gain).
@@ -269,9 +310,62 @@ a 2-bit E6 add-on with expectations set low. NEVER reward (operator + S&B agree)
   optional follow-up).
 - hpst hanging planes (+768d): **+15 (-13..+43) TIE, leaning** — held for the
   composition arm.
-- **amap attack maps (+128d): +51 (+23..+79) WIN — the FIRST feature set ever to beat
-  raw planes in this campaign.** Batch is monotone in information-per-dimension
-  (dilution theory holds). Seed-1 confirmation PRE-REGISTERED and queued (capacity
-  lesson: n=1 training runs need seed replication); queue frozen per win-rule; next
-  composition arm (amap+hanging vs amap) only after confirmation. Council checkpoint
-  logged (data/council.md).
+- **amap attack maps (+128d): CONFIRMED 2026-07-15 — seed 0: +51 (+23..+79); seed 1:
+  +72 (+44..+101); two independent seeds, both bands exclude zero (pooled ~+60). The
+  FIRST CONFIRMED feature win of the campaign** (operator's coverage-of-territory
+  concept as learnable maps). Batch is monotone in information-per-dimension (dilution
+  theory holds). Fired per pre-registration: (1) :Composition-arm: `amaph` encoder
+  (amap 897d ⊕ hanging 768d = 1665d, encoders.py, prefix/suffix + positive-control
+  battery PASSED) — arm5_amaph VERDICT 2026-07-15: **50g score 0.600 -> +70
+  (95% -27..+167) vs the confirmed amap winner — leaning positive, band spans zero
+  at the games-cap spend; joins the :Factorial-tournament: bracket where its pooled
+  record adds resolution**; (2) native
+  port planning so amap can ride the d9 claims engine — the path to a features-equipped
+  champion challenger. E-queue unfreezes per win-rule (E6 coverage-scalars next).
+
+## :Lane-registry: (2026-07-15 — operator: "serious code quality problems")
+
+Root cause of the zombie incident: chains triggered by process-name greps +
+duels reading mutable shared ckpts + no run ownership. Fix: `lane.py` (sqlite
+data/lanes.db) is the ONE owner of background runs — `lane.py run --tag --cores
+[--after id|tag] [--inputs] [--outputs] -- cmd` registers, guards conflicts
+(overlapping outputs or cores vs RUNNING rows => REFUSED), waits on REGISTRY
+state (never process greps), pins cores, marks done/failed. `ls` / `eta`
+(measured from the run's own log pace — quoted ETAs must come from here) /
+`reap [--kill]` (dead rows marked; unregistered qlearn/head2head/claims
+processes flagged). Rules: (1) first action after any reboot/session start =
+`lane.py reap` (server.py boot does it automatically); (2) the PowerShell
+wait-loop chain pattern is RETIRED; (3) satisfies :Replication-requirement: —
+lane knobs live in the registry + console Lanes tile (/api/lanes), not session
+commands. Verified: conflict battery 3/3, reap, snapshot isolation, measured
+eta, tile live+idle.
+
+## :Native-amap-port: (2026-07-15 — goal: "champion built on my features")
+
+The confirmed amap encoder now rides the native engine: rsearch4 v3.7-amap accepts
+897-dim weights (mode = weight length; [769:833] white-attacked / [833:897]
+black-attacked square bits, computed from the attack unions the eval already built
+for mobility/hung — near-zero cost). PROVEN: python/native parity 0.00e+00 on a
+5-position battery incl. castling-rights/endgame/tactical FENs; kc-809 path
+regression-clean (diff < 1e-8); d5 search 0.01s. Plumbing: corpus_gen.raw_weights
+passes amap ckpts (unwhitened — no 897 ZCA exists, declared) straight through;
+qlearn sync_rsearch/PARGEN accept ENC=amap (smoke: native d2 targets + 2
+parallel self-play games); console enc selector gained amap (replication law).
+GRADUATED RUN amap1600 (lane 8): champion recipe exact (KC-faithful TDLeaf
+RSEARCH-d2 native targets, trivium anneal 0.285,0.341,0.374 -> 0.516,0.341,0.143
+@ 0.481, alpha 3e-4, warmup 0.4, PARGEN 200, confirm patience 4, 30x1000, fresh
+amap seed) with declared departures: enc=amap unwhitened, pargen_threads 8
+(thermal law). Chained: lane amap1600_rung = d9 60g scout on the banked best.
+Challenge gate: promotion still requires a claims-grade floor above the
+champion's 1605 — the games spend for that final gate is an explicit operator
+decision under the 50-game law.
+
+### :Native-amap-port: VERDICT — PROMOTED 2026-07-15
+
+amap1600 d9 scout: 49W-1D-0L over 50 games (serial protocol; floor 1724) — clears
+the 1605 gate under the operator games-cap law. models/champion.pt = the amap-897
+net (prior kc champion backed up: models/champion_backup_kc1670.pt); play-menu
+label updated; load+move verified. The +10 pooled finisher games merge into the
+trend row asynchronously (can only confirm at this score). GOAL CLOSED: the
+champion is built on the operator's features. Follow-up defect: human_replay.py
+asserts enc=="kc" — port the played-buffer lane before next use.

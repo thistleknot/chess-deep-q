@@ -101,3 +101,32 @@ pre-registered rule. Two independent training seeds, same sign, both exclude zer
 3. Scope limits: effect measured in the Adam+replay diagnostic regime on the duel
    scale; transfer to the KC-faithful production recipe and to SF-anchored strength is
    untested. The champion and leaderboard are unaffected.
+
+## :Sharded-duel: + :Sample-size-policy: (operator 2026-07-15 — results in minutes, not hours)
+
+:Sharded-duel: — duel games are independent at fixed depth (no clocks, so CPU
+contention cannot bias them): head2head fans games across H2H_SHARDS workers
+(default 6), paired openings preserved WITHIN each shard, shard rng streams
+disjoint (SEED + 1000*(k+1)), one merged Wilson band. H2H_SHARDS=1 = the exact
+serial path with interim bands. PROVEN: 3-shard smoke, parallel workers, merged
+band. A 600g duel is now ~15 min on a free box.
+
+:Sample-size-policy: (operator law 2026-07-15, supersedes the draft table):
+"explorations with 20, then full run with 50, and that's it — if you are just
+trying to measure elo, 50 is sufficient. Training is different." Encoded as
+head2head :Games-cap: H2H_CAP=50 (clamps any requested count; raising it is an
+explicit operator act). Resolution stays printed on every verdict line (50g ~
++-97 Elo at 95%), and the standing Guarantee holds: no verdict sentence may
+claim an effect smaller than the band its games can resolve — a 50g band that
+spans zero reads "no detectable effect at this spend", not "no effect".
+Training game volumes (e.g. s200 epochs) are training, not measurement — uncapped
+by this law. Historical 600g verdicts (amap seeds 0/1) predate the law and stand.
+
+## :Input-snapshot: (2026-07-15 — zombie-retrain contamination fix)
+
+At duel start head2head copies every file-path token of both mover specs into
+data/runs/<tag>/ and loads ONLY the frozen copies; the verdict line appends
+`| in <name>#<sha8> ...`. Guarantee: no concurrent writer can alter a running
+duel's nets (PROVEN: source overwritten mid-duel, verdict hash = pre-overwrite).
+Require: duel specs use repo-relative paths (drive-colon absolute paths are not
+split-safe).

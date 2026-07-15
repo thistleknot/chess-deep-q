@@ -180,7 +180,7 @@ def move_values_d3(board, value_fn, beam=12, w2=8, qext=False, want_leaves=False
 
 
 def search_move(board, value_fn, tau=0.0, rng=None, width=8, depth=2, beam=12, qext=False,
-                guard=False, return_leaf=False, encode_fn=encode):
+                guard=False, return_leaf=False, encode_fn=encode, soft_backup_tau=0.0):
     """Root policy: argmax when tau<=0 (measurement), softmax sample otherwise.
     depth=2 -> move_values(width); depth=3 -> move_values_d3(beam, w2=width).
     guard: mate-in-1 guard on the argmax path — walk candidates best-first, take an immediate
@@ -189,6 +189,9 @@ def search_move(board, value_fn, tau=0.0, rng=None, width=8, depth=2, beam=12, q
     only until the first safe candidate; if EVERY move allows mate, falls back to best-valued.
     return_leaf (spec :PV-leaf:, TDLeaf): return (move, leaf_encoding_of_chosen_move,
     greedy_search_value, predicted_reply) — gv is the White-absolute best BACKED root value;
+    soft_backup_tau (spec :Backup-temperature:, operator's eligibility-trace analogy): >0
+    replaces the max-backup gv with MELLOWMAX over the backed root values (Asadi & Littman
+    2017) — tau_b->0 = minimax max, tau_b->inf = MC-style mean; move CHOICE is unchanged;
     predicted_reply (:Ramp-filter:) is the opponent reply the search expects to the CHOSEN
     move (None when the chosen move was unexpanded)."""
     if depth >= 3:
@@ -228,5 +231,11 @@ def search_move(board, value_fn, tau=0.0, rng=None, width=8, depth=2, beam=12, q
         p /= p.sum()
         j = int(rng.choices(range(len(moves)), weights=p)[0])
     if return_leaf:
-        return moves[j], leaves[j], float(vals[greedy_j]), out[4][j]
+        gv = float(vals[greedy_j])
+        if soft_backup_tau > 0:
+            bv = sigma * (vals[bidx] if bidx else vals)     # mover-perspective BACKED values
+            m = float(bv.max())
+            gv = sigma * (m + soft_backup_tau
+                          * float(np.log(np.mean(np.exp((bv - m) / soft_backup_tau)))))
+        return moves[j], leaves[j], gv, out[4][j]
     return moves[j]

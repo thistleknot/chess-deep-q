@@ -201,11 +201,18 @@ OPP        = os.environ.get("QLEARN_OPP", "self")              # self | graded (
 # generation vs an opponent LADDER (random -> heuristic -> SF skill 0/2/5/10 -> SF@1320) with
 # matchmaking that holds the score near 50% — KnightCap's actual headline finding (cs/9901002:
 # online play vs graded opponents; their self-play TDLeaf variant was substantially weaker).
+SOFT_BACKUP = float(os.environ.get("QLEARN_SOFT_BACKUP", "0"))  # :Backup-temperature: organ
+# (spec/bullet-route.spec.md, operator's eligibility-trace analogy): tau_b start value for the
+# MELLOWMAX bootstrap over the d2 beam's backed root values, annealed tau_hi -> 0 (= exact
+# max-backup) with the shared :anneal:/WARMUP schedule — trust the mean while the net is noisy,
+# slide to minimax as it sharpens. 0 = OFF (default; flags-off-inert). Python-beam TDLeaf only.
 TDLEAF     = os.environ.get("QLEARN_TDLEAF", "0") == "1"       # Merge 5 (spec/tdleaf.spec.md
 # :TDLeaf-mode:): generation plays the SEARCH policy and the stored training pair becomes
 # (PV-leaf encoding, λ-return bootstrapped on MINIMAX root values) — TD errors between successive
 # search values, gradients at the leaves whose static evals produced them (Baxter et al. 1999).
 # build_targets/buffer/anneals/ratchet are untouched; only the (x, gv) pair choose() emits changes.
+assert not (SOFT_BACKUP > 0 and RSEARCH_D > 0), \
+    ":Backup-temperature: applies to the python d2 beam only — set QLEARN_RSEARCH_DEPTH=0"
 CONFIRM    = os.environ.get("QLEARN_CONFIRM", "1") == "1"      # spec :Confirmed-crown:: a candidate
 # best must SURVIVE an independent re-measure before it is crowned — max over noisy epoch
 # samples otherwise ratchets on luck (S&B 015, the outer-loop twin of :Backed-bootstrap:).
@@ -276,7 +283,8 @@ class QAgent:
         every weight load/sync on the net that generates games (init, epoch sync, revert)."""
         if RSEARCH_D <= 0:
             return
-        assert ARCH == "linear" and ENC == "kc", "rsearch requires linear arch + kc encoding"
+        assert ARCH == "linear" and ENC in ("kc", "amap"), \
+            "rsearch requires linear arch + kc/amap encoding (:Native-amap-port: v3.7)"
         import importlib
         Searcher = importlib.import_module(RSEARCH_MOD).Searcher
         w, b = self.weights_flat()
@@ -314,7 +322,8 @@ class QAgent:
             return chess.Move.from_uci(mv_u), leaf_enc, float(val), pred
         if TDLEAF:
             return search_move(board, self.value_fn, max(tau, 1e-6), rng, SEARCH_W,
-                               depth=SEARCH_D, return_leaf=True, encode_fn=ENC_FN)
+                               depth=SEARCH_D, return_leaf=True, encode_fn=ENC_FN,
+                               soft_backup_tau=getattr(self, "sb_tau", 0.0))
         moves, X, v = self.afterstate_values(board)
         sign = 1.0 if board.turn == chess.WHITE else -1.0
         greedy_v = float(v.max() if sign > 0 else v.min())
@@ -614,6 +623,8 @@ def learned_piece_worth(agent):
 
 
 def main():
+    from thermal import engage
+    engage()                    # :Thermal-guard: — training epochs run for hours
     epoch_games = int(sys.argv[1]) if len(sys.argv) > 1 else EPOCH_GAMES
     max_epochs = int(sys.argv[2]) if len(sys.argv) > 2 else MAX_EPOCHS
     total_games = epoch_games * max_epochs                 # τ warmup denominator (max budget)
@@ -710,6 +721,10 @@ def main():
     while games_played < total_games:
         chunk = min(batch_games, total_games - games_played, epoch_games - ep_games)
         tau = tau_at(games_played, total_games, cum_games)     # metrics row + serial behavior
+        if SOFT_BACKUP > 0:                                    # :Backup-temperature: anneal
+            agent.sb_tau = anneal(SOFT_BACKUP, 0.0,
+                                  (cum_games + games_played) / max(1, cum_games + total_games),
+                                  WARMUP)
         if STALE_REHEAT > 0:
             tau *= min(1.0 + STALE_REHEAT * stale, 4.0)        # :Stale-reheat:
         if LR_WARMUP > 0:                                      # :LR-warmup:: linear 5%->100% ramp
@@ -736,6 +751,10 @@ def main():
         else:
             for _ in range(chunk):
                 tau = tau_at(games_played, total_games, cum_games)
+                if SOFT_BACKUP > 0:                              # :Backup-temperature: anneal
+                    agent.sb_tau = anneal(SOFT_BACKUP, 0.0,
+                                          (cum_games + games_played)
+                                          / max(1, cum_games + total_games), WARMUP)
                 if STALE_REHEAT > 0:
                     tau *= min(1.0 + STALE_REHEAT * stale, 4.0)  # :Stale-reheat:
                 if ladder is not None:
