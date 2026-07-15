@@ -53,3 +53,15 @@ import:
 
 - The raw mover-value must be logged beside :Move-regret: each move so the regret signal can be validated without a second control path.
 - :Difficulty-controller: state resets at game start but may be warm-started from seed_mean; cross-session persistence is out of scope here.
+
+## :Sigma-offset: (operator amendment 2026-07-14 — supersedes the "no variance" clause)
+
+The controller now tracks the player's regret VARIANCE as an EMA alongside the mean
+(`player_var <- (1-a)*player_var + a*(r - player_mean_old)^2`), and the setpoint is
+`player_mean + DIFFICULTY_OFFSET_SDEV * sqrt(player_var)` — "one sdev above the
+player's current skill": challenged, not outgunned. Until DIFFICULTY_MIN_SAMPLES (4)
+player moves are observed, the legacy additive DIFFICULTY_OFFSET remains the
+warm-start setpoint. Constants: DIFFICULTY_OFFSET_SDEV=1.0, DIFFICULTY_MIN_SAMPLES=4
+(constants.py). Verified: gate battery G2 (strong/weak/improving synthetic streams —
+setpoint sits above the mean by exactly OFFSET_SDEV*sdev; fallback exact below
+MIN_SAMPLES).

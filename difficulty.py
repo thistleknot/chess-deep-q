@@ -6,18 +6,23 @@ quality measure), maintains an EMA of the human's mean regret, and adjusts the c
 root-selection temperature by proportional feedback so the opponent tracks a target of
 `player_mean + offset` (offset > 0 = slightly stronger, < 0 = handicap).
 
-Deliberately simple: with one human there is exactly one skill to estimate, so a mean plus an
-additive offset is the whole signal -- no variance/standard-deviation. Regret is measured with
-the learned value function, so this module never depends on the prior evaluator, and it is
-orthogonal to the annealing schedule's prior-bias temperature.
+Setpoint (:Sigma-offset:, operator 2026-07-14): the player's regret VARIANCE is tracked as an
+EMA alongside the mean, and the target is `player_mean + OFFSET_SDEV * player_sdev` — "one sdev
+above the player's current skill" — challenged but not outgunned. Until MIN_SAMPLES player
+moves have been observed the legacy additive offset is the warm-start fallback. Regret is
+measured with the learned value function, so this module never depends on the prior evaluator,
+and it is orthogonal to the annealing schedule's prior-bias temperature.
 """
+
+import math
 
 import chess
 
 from constants import (
     USE_DYNAMIC_DIFFICULTY,
     STRENGTH_TEMP_MIN, STRENGTH_TEMP_MAX,
-    DIFFICULTY_OFFSET, PLAYER_EMA_ALPHA, DIFFICULTY_GAIN,
+    DIFFICULTY_OFFSET, DIFFICULTY_OFFSET_SDEV, DIFFICULTY_MIN_SAMPLES,
+    PLAYER_EMA_ALPHA, DIFFICULTY_GAIN,
 )
 
 
@@ -53,7 +58,8 @@ class DifficultyController:
     def __init__(self, value_fn, best_move_fn, enabled=USE_DYNAMIC_DIFFICULTY,
                  mode="auto", fixed_temperature=0.5,
                  offset=DIFFICULTY_OFFSET, ema_alpha=PLAYER_EMA_ALPHA, gain=DIFFICULTY_GAIN,
-                 temp_min=STRENGTH_TEMP_MIN, temp_max=STRENGTH_TEMP_MAX, seed_mean=0.0):
+                 temp_min=STRENGTH_TEMP_MIN, temp_max=STRENGTH_TEMP_MAX, seed_mean=0.0,
+                 offset_sdev=DIFFICULTY_OFFSET_SDEV, min_samples=DIFFICULTY_MIN_SAMPLES):
         # value_fn(board) -> White-absolute value; best_move_fn(board) -> policy's best move
         self.value_fn = value_fn
         self.best_move_fn = best_move_fn
@@ -66,27 +72,42 @@ class DifficultyController:
         self.temp_min = temp_min
         self.temp_max = temp_max
         self.seed_mean = seed_mean
+        self.offset_sdev = offset_sdev
+        self.min_samples = min_samples
         self.reset()
 
     def reset(self):
         """Reset per-game state; the skill level warm-starts from the configured seed."""
         self.player_mean = self.seed_mean
+        self.player_var = 0.0
+        self.player_samples = 0
         self.temperature = (self.fixed_temperature if self.mode == "fixed"
                             else 0.5 * (self.temp_min + self.temp_max))
         self.log = []  # per-move records: {who, regret, raw, temp?, setpoint?}
 
+    def player_sdev(self):
+        """EMA estimate of the player's regret standard deviation."""
+        return math.sqrt(max(self.player_var, 0.0))
+
     def setpoint(self):
-        """Target regret for the computer: player's mean regret plus a fixed offset."""
+        """Target regret for the computer (:Sigma-offset:): player's mean regret plus
+        OFFSET_SDEV player-sdevs (toward 0 = slightly stronger than the player's mean);
+        falls back to the legacy additive offset until MIN_SAMPLES moves are observed."""
+        if self.player_samples >= self.min_samples:
+            return self.player_mean + self.offset_sdev * self.player_sdev()
         return self.player_mean + self.offset
 
     def observe_player_move(self, board_before, move):
-        """Update the player's mean-regret skill level from the human's move."""
+        """Update the player's mean- and variance-of-regret skill estimate from the human's move."""
         if not self.enabled:
             return
         best = self.best_move_fn(board_before)
         regret, raw = move_regret(board_before, move, self.value_fn, best)
         a = self.ema_alpha
+        delta = regret - self.player_mean
         self.player_mean = (1.0 - a) * self.player_mean + a * regret
+        self.player_var = (1.0 - a) * self.player_var + a * delta * delta
+        self.player_samples += 1
         self.log.append({'who': 'human', 'regret': regret, 'raw': raw})
 
     def next_temperature(self):

@@ -23,13 +23,26 @@ def play_mode():
     """Human vs a :Selectable-agent: through the terminal-interface front-end (fallback: REPL)."""
     from agents import make_agent, AgentAdapter, play_loop
     name = _pick_agent()
-    label, move_fn, value_fn = make_agent(name, playouts=_PLAY_PLAYOUTS)
+    label, move_fn, value_fn = make_agent(name, playouts=_PLAY_PLAYOUTS,
+                                          depth=_DIFFICULTY["depth"])
     if move_fn is None:
         return
+    settings, calibrator = None, None
+    if name == "champion" and _DIFFICULTY["choice"] != "full":
+        calibrator = _load_calibrator()
+        if _DIFFICULTY["choice"] == "fixed":
+            settings = {"enabled": True, "mode": "fixed",
+                        "fixed_temperature": _DIFFICULTY["tau"]}
+            print(f"[difficulty] fixed temperature {_DIFFICULTY['tau']:.2f} "
+                  f"(≈{calibrator.policy_elo(_DIFFICULTY['tau']):.0f} Elo)")
+        else:
+            settings = {"enabled": True, "mode": "auto"}
+            print("[difficulty] dynamic — the opponent will track ~1 sdev above your play")
     human_white = (input("Play as white? (y/n, default y): ").strip().lower() or "y") == "y"
     try:
         from terminal_board import TerminalChessBoard
-        adapter = AgentAdapter(move_fn, value_fn)
+        adapter = AgentAdapter(move_fn, value_fn, elo_calibrator=calibrator,
+                               difficulty_settings=settings)
         human_color = chess.WHITE if human_white else chess.BLACK
         TerminalChessBoard(chess.Board(), adapter, human_color=human_color).start()
     except Exception as e:
@@ -70,19 +83,74 @@ def measure_mode():
         print(f"  vs {rung:14s}: {W}W-{D}D-{L}L  score {s:.2f}  elo_diff {elo_diff(s):+.0f}", flush=True)
 
 
+def _load_calibrator():
+    """:Absolute-strength-dial: source — measured elo_calibration.json only if its taus
+    actually SEPARATE (the shipped file is a degenerate placeholder: all gaps equal);
+    otherwise the :Approximate-elo-curve: default anchored at the champion's measured
+    d2 band (~1183; flagged approximate/assumed in the readout, per spec)."""
+    import os
+    from elo_calibration import TemperatureEloCalibrator
+    from constants import ELO_CALIBRATION_PATH
+    if os.path.exists(ELO_CALIBRATION_PATH):
+        try:
+            cal = TemperatureEloCalibrator.load(ELO_CALIBRATION_PATH)
+            gaps = {round(v["elo_gap"]) for t, v in cal.table.items() if t > 1e-6}
+            if len(gaps) > 1:
+                return cal
+        except Exception:
+            pass
+    return TemperatureEloCalibrator(anchor_elo=1183, anchor_measured=False)
+
+
+def _tau_for_elo(cal, target):
+    """Inverse dial: temperature whose curve Elo is closest to the target."""
+    grid = [0.05, 0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1.1, 1.5, 2.0, 2.5, 3.0]
+    return min(grid, key=lambda t: abs(cal.policy_elo(t) - target))
+
+
+# :Difficulty-mode: state consumed by play_mode when the champion is selected.
+_DIFficulty_DEFAULT = {"choice": "dynamic", "tau": None, "depth": 9}
+_DIFFICULTY = dict(_DIFficulty_DEFAULT)
+
+
 def difficulty_mode():
-    """:Difficulty-mode: — the play-strength dial. For net+PUCT the honest knob is playouts."""
-    global _PLAY_PLAYOUTS
-    print(f"\nPlay strength = PUCT playouts (more = stronger, slower). Current: {_PLAY_PLAYOUTS}")
-    print("  ~40 weak · ~160 default · ~400 strong")
-    raw = input(f"Set playouts (blank keeps {_PLAY_PLAYOUTS}): ").strip()
+    """:Difficulty-mode: — champion strength dial (dynamic / fixed Elo / full) + the
+    legacy PUCT playouts knob."""
+    global _PLAY_PLAYOUTS, _DIFFICULTY
+    print("\nChampion difficulty:")
+    print("  1. dynamic (default) — tracks YOUR play, targets ~1 sdev above your level")
+    print("  2. fixed Elo        — pick a strength and it stays there")
+    print("  3. full strength    — the 1670-claims engine (d9 argmax)")
+    c = input("Choose (1-3, default 1): ").strip() or "1"
+    if c == "2":
+        cal = _load_calibrator()
+        tiers = [800, 1000, 1183, 1400, 1572, 1670]
+        print("  fixed tiers: " + "  ".join(f"{i+1}.~{e}" for i, e in enumerate(tiers)))
+        k = input("Tier (1-6, default 3): ").strip() or "3"
+        target = tiers[max(0, min(5, int(k) - 1))] if k.isdigit() else 1183
+        if target >= 1670:
+            _DIFFICULTY = {"choice": "full", "tau": None, "depth": 9}
+        elif target >= 1572:
+            _DIFFICULTY = {"choice": "full", "tau": None, "depth": 7}
+        else:
+            tau = _tau_for_elo(cal, target)
+            _DIFFICULTY = {"choice": "fixed", "tau": tau, "depth": 9}
+            print(f"fixed strength ≈{target} Elo -> temperature {tau:.2f} "
+                  f"({'measured' if not cal.approximate else 'approximate'} curve)")
+    elif c == "3":
+        _DIFFICULTY = {"choice": "full", "tau": None, "depth": 9}
+    else:
+        _DIFFICULTY = dict(_DIFficulty_DEFAULT)
+    print(f"champion difficulty: {_DIFFICULTY['choice']}"
+          + (f" (tau {_DIFFICULTY['tau']:.2f})" if _DIFFICULTY["tau"] else "")
+          + (f" (d{_DIFFICULTY['depth']})" if _DIFFICULTY["choice"] == "full" else ""))
+    raw = input(f"PUCT playouts (blank keeps {_PLAY_PLAYOUTS}; only affects the puct agent): ").strip()
     if raw:
         try:
             _PLAY_PLAYOUTS = max(8, int(raw))
-            print(f"Play strength set: {_PLAY_PLAYOUTS} playouts.")
+            print(f"PUCT playouts: {_PLAY_PLAYOUTS}.")
         except ValueError:
             print("Unchanged.")
-    print("(Full temperature→Elo calibration + human-tracking difficulty: elo-calibration follow-on.)")
 
 
 def top_menu():

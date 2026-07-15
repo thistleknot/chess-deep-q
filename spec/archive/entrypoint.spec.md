@@ -29,9 +29,17 @@ import:
 
 - :Entrypoint: must boot straight into the :Top-menu:.
   - Given `python main.py`, Then the :Top-menu: (Play / Train / Measure / Difficulty / exit) is shown; no DQN goal-picker precedes it.
-- :Play-mode: must default to net+PUCT through the terminal-interface front-end.
-  - Given :Play-mode: with no explicit agent choice, Then the opponent is net+PUCT; the engine is offered only as an explicit optional opponent; the game runs through `terminal_board.py` with White-default :Side-selection: identical across fresh / load / FEN (fixing the FEN path that hardcoded White).
+- :Play-mode: must default to the CHAMPION through the terminal-interface front-end (2026-07-14; was net+PUCT).
+  - Given :Play-mode: with no explicit agent choice, Then the opponent is the champion (d9, 1670 claims); the other roster agents are offered only as explicit optional opponents; the game runs through `terminal_board.py` with White-default :Side-selection: identical across fresh / load / FEN (fixing the FEN path that hardcoded White).
 - :Train-mode: must call the :Stage-controller:, not a flat loop.
   - Given :Train-mode:, Then `train_control.train(approach)` runs the gated staged pipeline (default PUCT self-play) and checkpoints per the :Run-contract:.
 - :Measure-mode: must place the :Selectable-agent: on the :Ladder: and report :Measured-elo:.
 - :Difficulty-mode: must dial the trained net via the :Absolute-strength-dial:, never the DQN.
+
+## :Difficulty-mode: activation (2026-07-14)
+
+difficulty_mode() now sets the champion dial (dynamic :Sigma-offset: tracking / fixed
+Elo tiers / full strength) and play_mode() passes `difficulty_settings` +
+`elo_calibrator` into the AgentAdapter — the dormant :Difficulty-controller: +
+:Estimated-elo-readout: path is live for the champion. The PUCT playouts knob remains
+for the puct agent. (Gates G1-G3 in the session battery; acceptance = operator play.)

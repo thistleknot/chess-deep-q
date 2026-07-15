@@ -73,9 +73,12 @@ MCTS_SAMPLES_END = [21, 13, 8, 5, 3, 2, 1]
 USE_DYNAMIC_DIFFICULTY = False
 STRENGTH_TEMP_MIN = 0.05     # at/below this the computer plays argmax (strongest)
 STRENGTH_TEMP_MAX = 3.0      # flattest sampling over visit counts (weakest)
-# Setpoint = player_mean_regret + DIFFICULTY_OFFSET. Additive (no variance/sigma): with one
-# human there is exactly one skill to estimate, so mean + a fixed offset is the whole signal.
-DIFFICULTY_OFFSET = 0.02     # >0 = opponent slightly stronger than player; <0 = handicap
+# Setpoint = player_mean_regret + DIFFICULTY_OFFSET_SDEV * player_regret_sdev once enough
+# samples exist (operator 2026-07-14: "one sdev above the player's current skill"); before
+# MIN_SAMPLES the legacy additive DIFFICULTY_OFFSET is used as the warm-start fallback.
+DIFFICULTY_OFFSET = 0.02     # fallback additive bias (>0 stronger, <0 handicap)
+DIFFICULTY_OFFSET_SDEV = 1.0 # sigma multiplier on the player's regret sdev (the main dial)
+DIFFICULTY_MIN_SAMPLES = 4   # player moves observed before trusting the sdev estimate
 PLAYER_EMA_ALPHA = 0.25      # smoothing of the player's mean-regret skill level
 DIFFICULTY_GAIN = 0.5        # proportional gain of the temperature controller
 

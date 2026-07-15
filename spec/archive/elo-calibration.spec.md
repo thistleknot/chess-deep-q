@@ -48,3 +48,21 @@ import:
 - The :Estimated-elo-readout: must be surfaced each turn while an adjusting/fixed opponent is active.
   - Given a :Difficulty-controller: opponent (auto or fixed) is enabled, When a board is shown, Then the opponent's Elo (from :Strength-temperature:) and the human's Elo (from :Player-skill-level:) are displayed together, each labeled approximate or measured per the active curve.
   - Given the opponent is at full strength (:Difficulty-controller: disabled), Then no per-turn readout is required (there is no relative skill signal being tracked).
+
+## Champion wiring (2026-07-14 — the :Strength-temperature: dial for the native engine)
+
+- The champion (`agents.ChampionAgent`) exposes `root_move(board, tau)`: tau <= 0.02 ->
+  full-depth deep-search argmax (d9, the 1670-claims engine); tau > 0.02 -> softmax over
+  DIFF_DEPTH(=2)-backed child values, mover-perspective, UNNORMALIZED — so low tau only
+  randomizes among near-equal moves (flat positions) and locks the best move in sharp
+  ones (gate G1: regret monotone in tau, 0.058/0.604/0.621 cold/mid/hot on a
+  hanging-queen battery; cold top-hit 38/40). Repetition-refusal per the pinned H2H
+  cycle-lock lesson. Argmax is always reported (adapter caches `last_root_best` for
+  :Move-regret:).
+- Fixed :Absolute-strength-dial: tiers in the menu: ~800/1000/1183 via tau on the curve;
+  1572/1670 = argmax at measured depths d7/d9 (claims-grade dial points).
+- models/elo_calibration.json is accepted ONLY if its taus separate (the shipped file is
+  a degenerate placeholder from a near-random old net); otherwise the
+  :Approximate-elo-curve: default is used, anchored at the champion d2 band (~1183),
+  flagged approximate/assumed in the readout per this spec. A measured tau-grid
+  calibration vs SF@1320 is the follow-on that clears the flag.

@@ -4,9 +4,87 @@ One home for loading a trained agent and returning its move function — shared 
 :Measure-mode:. Also `AgentAdapter`, which lets any move_fn drive the terminal-interface front-end
 (`terminal_board.py`), and `play_loop`, a simple SAN/UCI REPL fallback.
 """
+import math
 import os
+import random
 
 import chess
+
+TAU_ARGMAX = 0.02   # at/below this the champion plays its full-depth deep-search argmax
+DIFF_DEPTH = 2      # difficulty band: root sampling over depth-2-backed child values
+
+
+class ChampionAgent:
+    """Champion move source with a :Strength-temperature: dial (spec/archive/
+    dynamic-difficulty.spec.md). Callable as a plain move_fn (tau=0 = full strength);
+    `root_move(board, tau)` is the dial: tau <= TAU_ARGMAX -> deep argmax at `depth`;
+    otherwise softmax-sample over DIFF_DEPTH-backed child values (mover-perspective),
+    refusing a repetition when any alternative exists (pinned H2H lesson: deterministic
+    or near-deterministic play cycle-locks into fivefold repetition)."""
+
+    def __init__(self, srch, depth=9, diff_depth=DIFF_DEPTH, rng=None):
+        self.srch = srch
+        self.depth = depth
+        self.diff_depth = diff_depth
+        self.rng = rng or random.Random()
+
+    def __call__(self, board):
+        return self.root_move(board, 0.0)[0]
+
+    def value(self, board):
+        """White-absolute value in [-1,1] (tanh of the native static score)."""
+        return math.tanh(float(self.srch.score(board.fen())))
+
+    def _child_values(self, board):
+        """(moves, mover-perspective backed values at diff_depth)."""
+        sgn = 1.0 if board.turn == chess.WHITE else -1.0
+        moves, vals = [], []
+        for mv in board.legal_moves:
+            board.push(mv)
+            if board.is_checkmate():
+                v = sgn * 1e9                       # mover mates: always best
+            elif board.is_game_over():
+                v = 0.0                             # stalemate / dead draw
+            elif self.diff_depth >= 2:
+                v = sgn * float(self.srch.search(board.fen(), self.diff_depth - 1)[1])
+            else:
+                v = sgn * math.tanh(float(self.srch.score(board.fen())))
+            board.pop()
+            moves.append(mv)
+            vals.append(v)
+        return moves, vals
+
+    def root_move(self, board, tau=0.0):
+        """Return (played_move, argmax_move) at strength-temperature tau."""
+        if tau <= TAU_ARGMAX:
+            mv = chess.Move.from_uci(self.srch.search(board.fen(), self.depth)[0])
+            return mv, mv
+        moves, vals = self._child_values(board)
+        best_i = max(range(len(moves)), key=lambda i: vals[i])
+        mx = vals[best_i]
+        ws = [math.exp(min((v - mx) / tau, 0.0)) for v in vals]
+        total = sum(ws)
+        r = self.rng.random() * total
+        pick = len(moves) - 1
+        acc = 0.0
+        for i, w in enumerate(ws):
+            acc += w
+            if r <= acc:
+                pick = i
+                break
+        # repetition refusal: if the sampled move repeats, take the best non-repeating one
+        board.push(moves[pick])
+        repeats = board.is_repetition(2)
+        board.pop()
+        if repeats:
+            for i in sorted(range(len(moves)), key=lambda i: -vals[i]):
+                board.push(moves[i])
+                ok = not board.is_repetition(2)
+                board.pop()
+                if ok:
+                    pick = i
+                    break
+        return moves[pick], moves[best_i]
 
 
 def _load_tower(path, dev):
@@ -46,9 +124,8 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
         from corpus_gen import raw_weights
         w, b = raw_weights(path)                     # ZCA identity-gated 809 conversion
         srch = importlib.import_module("rsearch4").Searcher(w, b)
-        return (f"champion(d{depth}, 1670-claims)",
-                (lambda bd: chess.Move.from_uci(srch.search(bd.fen(), depth)[0])),
-                (lambda bd: float(srch.score(bd.fen()))))
+        champ = ChampionAgent(srch, depth=depth)
+        return (f"champion(d{depth}, 1670-claims)", champ, champ.value)
     if name == "puct":
         path = "models/tower_puct.pt"
         if not os.path.exists(path):
@@ -91,6 +168,7 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
 class _ValueShim:
     def __init__(self, value_fn):
         self._v = value_fn
+        self.last_root_best = None    # argmax root move of the agent's last selection
     def get_q_value(self, board):
         return self._v(board)
 
@@ -106,7 +184,16 @@ class AgentAdapter:
         self.elo_calibrator = elo_calibrator
         self.difficulty_settings = difficulty_settings or {"enabled": False, "mode": "off", "offset": 0.0}
 
-    def get_best_move(self):
+    def get_best_move(self, temperature=0.0):
+        """Move at the controller's :Strength-temperature:. Agents exposing `root_move`
+        (the champion) honor it and report their argmax via dqn_agent.last_root_best
+        (the :Move-regret: baseline terminal_board reads); others ignore temperature."""
+        rm = getattr(self._move_fn, "root_move", None)
+        if rm is not None:
+            mv, best = rm(self.board, temperature)
+            self.dqn_agent.last_root_best = best
+            return mv
+        self.dqn_agent.last_root_best = None
         return self._move_fn(self.board)
 
 
