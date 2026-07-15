@@ -198,3 +198,27 @@ label is self-generated (own d2 search values + outcome, proven trivium blend 0.
    coverage self-play cannot generate (the hole-coverage lever).
 Also: :Sigma-offset: dial exposed in Difficulty (operator: +1sigma felt soft — the
 sigma is now a prompt, 1.5-2 = harder tracking).
+
+## :Feature-autoresearch: (operator delegation 2026-07-14 — canon-sourced hypothesis queue)
+
+Standing loop: when a verdict batch lands on the duel ruler, the next queued arm is
+built (encoders.py + gate battery + fresh seed), trained at the matched protocol, and
+dueled vs the control — WITHOUT a per-arm operator ask (explicit delegation for this
+feature campaign; operator may halt anytime). Queue sourced from the canonical
+inventory (chessprogramming.org/Evaluation) minus families already covered (material/
+PST = base; threats/hanging = arms A/B; mobility/space/center = arm C subsumes):
+
+| # | Arm | Encoder sketch | Canon note |
+|---|---|---|---|
+| E1 | pawn-structure planes | per-pawn-square: PASSED / isolated / doubled indicator planes | canon's top non-material family; passed pawns = the endgame lever |
+| E2 | king-safety counts | pawn-shield count (0-3) + enemy attackers in king zone (quantized) | canon "attack units"; operator idea #6 (quantized floats) applied |
+| E3 | piece-specific trio | rook-on-open/semi-open file per rook; bishop-pair flag; knight outposts | classic engine terms, all conjunctions |
+| E4 | defender-depth | attackers-minus-defenders count per occupied square (incl. batteries) | operator idea #5, Giraffe-adjacent |
+| E5 | per-piece mobility | quantized legal-move count per piece-square | trapped-pieces canon; Giraffe input class |
+
+Rules: single concept per arm; gate battery >=3 varied positions before any training;
+duel verdict vs the SAME fresh-seed control; band +-~30. STOP conditions: two
+consecutive arms tie/lose -> pause and council before continuing; any arm WINS ->
+freeze queue, compose winner(s) marginally, plan the native port (winners must ride
+d9 to matter for claims). Honest base rate carried: features are 0-for-N vs raw
+planes so far; arms A/B/C verdicts pending.
