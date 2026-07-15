@@ -139,3 +139,15 @@ stays in band. Measured (1 run/point, proven parms, Adam+replay regime, bake4 se
    more SF games per point (background lane) or a graded-rung pooled objective that
    isn't floored — before more volume rungs are bought. Bullet gate stays CLOSED until
    an instrument-grade slope exists; re-open is an operator decision.
+
+## Verdict-instrument amendment (2026-07-14 — grid blindness measured TWICE)
+
+The pooled 36-game objective QUANTIZES to SF half-points (0/36->~585, 0.5->~782,
+1.5->~782..): arms whose true gap is < ~120 pin to identical grid points (measured: the
+volume probe, then bake5 where tpst/hpst/amap all posted 585/586). Therefore:
+- FEATURE-ARM screening verdicts use the H2H duel ruler (spec/h2h-instrument.spec.md):
+  matched-protocol nets (same seed class, parms, games) dueled 600g vs a same-protocol
+  CONTROL net; band ±~30. Protocol: arm5_* runs -> enc:<name>:<ckpt> duels.
+- The pooled 3-trial study stays the screen for RECIPE/ORGAN arms where expected deltas
+  are >= the grid pitch (~100+).
+- bake5 pooled logs remain on /compare as historical grid numbers, not verdicts.
