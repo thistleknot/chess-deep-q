@@ -157,3 +157,26 @@ trivium/Q8 blends (house pattern: anneal trust dials).
 - EXPENSIVE half (play-time hybrid backup on sparse trees): parked behind the standing
   bar — must beat native d9 minimax at equal compute; requires native-side work either
   way (the 1000x python/native throughput gap dominates any operator gain).
+
+## :Operator-ideas-ledger: (2026-07-14 — every concept documented, statused, testable)
+
+| # | Idea (operator phrasing) | Spec home | Status |
+|---|---|---|---|
+| 1 | Scores are FEATURES not distillation (hand evals = declared feature defs) | this file :SME-features: framing | doctrine, adopted |
+| 2 | Threat/guard piece-square interactions (highlight engine as encoder) | qlearn/encoders `tpst` | duel RUNNING |
+| 3 | Hanging conjunction (threatened AND unguarded) as input plane | encoders `hpst` | duel queued |
+| 4 | Attack maps = learned mobility/space/center (no hand square-weights) | encoders `amap` | duel queued |
+| 5 | Defender DEPTH (first line + who is behind: battery/x-ray support) | arm-D, pre-registered | parked on 2-4 verdicts |
+| 6 | Quantized float counts (attacker/defender counts, not binary) | arm-D | parked on 2-4 verdicts |
+| 7 | %-of-board-held scalar | arm-D | parked on 2-4 verdicts |
+| 8 | QLoRA-style small dense adapter over the sparse base | capacity follow-on | parked (post-linear screen) |
+| 9 | Threat features = 1-ply knowledge injected at EVERY search node | consequence clause, :SME-features: | automatic if 2-4 win + native port |
+| 10 | Better tactical leaf eval can unlock MCTS (trap-blindness fix) | :MCTS-door: re-entry conditions | parked (needs native/GPU speed too) |
+| 11 | Lambda BETWEEN search operators (minimax<->MCTS backup blend) | :Backup-temperature: (Power-UCT/MENTS) | parked, organ test pre-registered |
+| 12 | Sufficiency over best (Elo bars + cost-ranked vehicles) | bakeoff tie->cost rule | doctrine, standing |
+| 13 | Dynamic difficulty at player+1sigma (regret EMA + variance) | dynamic-difficulty :Sigma-offset: | LIVE (gates passed) |
+| 14 | Depth ladder push (d9 "is fine") | claims ladder | RECEIPTED: 1572->1670 |
+
+Rule: an idea enters this ledger when voiced, gets a spec home + pre-registered test
+before any claim, and its status moves ONLY on measured verdicts (the honest-asterisk
+register applies here too — "winner" is a status this table assigns, not a prior).
