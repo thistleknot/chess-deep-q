@@ -222,3 +222,20 @@ consecutive arms tie/lose -> pause and council before continuing; any arm WINS -
 freeze queue, compose winner(s) marginally, plan the native port (winners must ride
 d9 to matter for claims). Honest base rate carried: features are 0-for-N vs raw
 planes so far; arms A/B/C verdicts pending.
+
+## Ledger idea #16: :Retreat: (operator 2026-07-14 — coverage-delta move concept)
+
+Definition (operator): a move that saves a threatened piece while NOT advancing net
+coverage — measurable as delta(covered squares, protected piece-points) <= 0 with no
+material change. Placements:
+1. STATE ingredients = linear spans of arms A (guard planes -> protected material with
+   LEARNED values) and C (attack maps -> coverage count) — already under duel; no new
+   arm needed while those are live.
+2. **E6 coverage-scalars (queued, PRIORITY-FIRST if A/B/C lose on dilution):** the
+   compressed projection — per-side covered-square count + per-piece-type protected and
+   threatened counts (~24 quantized floats vs ~1500 planes). Dilution-proof form of the
+   same information (kpst lesson applied).
+3. Move-level retreat DETECTOR: lawful as a UI/coaching cue (label the human move next
+   to the regret readout) and as a search move-ordering prior (behavior only). BANNED
+   as reward shaping (S&B chess clause: rewarding subgoals teaches subgoal-hacking —
+   sometimes the retreat IS the best move; the value function prices that itself).
