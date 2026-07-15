@@ -250,3 +250,14 @@ UI cue + played-buffer analytics (move-class mix vs regret); (3) search move-ord
 prior (behavior only). Declared caveat: as a STATE-value feature it is Markov-redundant
 (the position screens off the last move; canon cousin = tempo bonus) — if ever tested,
 a 2-bit E6 add-on with expectations set low. NEVER reward (operator + S&B agree).
+
+### Grounding check for #16/#17 (web, refutation-first, 2026-07-14)
+
+- #16 coverage maps = canon "space advantage" (controlled-square counts; SF classical
+  computed piece-activity/space intermediates); published analysis lens: "Statistical
+  analysis of chess games: space control and tipping points" (arXiv 2304.11425) —
+  VALIDATED precedent, E6 = space terms with learned prices.
+- #17 advance-before-retreat move ordering is EXISTING engine practice (move-ordering
+  canon: advancing generated before retreating; captures/killers/history taxonomy);
+  coaching-classifier cousins exist (eval-delta based "brilliant/blunder" tools) —
+  coverage-basis variant appears untried. Markov-redundancy caveat unchanged.
