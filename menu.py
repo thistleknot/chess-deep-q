@@ -20,8 +20,10 @@ def _pick_agent():
 
 
 def play_mode():
-    """Human vs a :Selectable-agent: through the terminal-interface front-end (fallback: REPL)."""
-    from agents import make_agent, AgentAdapter, play_loop
+    """Human vs a :Selectable-agent: through the terminal-interface front-end — the ONE
+    board, always (operator 2026-07-14). Fail-fast: no silent REPL downgrade — the old
+    catch-all swallowed a mid-game error, reset the game, and switched boards."""
+    from agents import make_agent, AgentAdapter
     name = _pick_agent()
     label, move_fn, value_fn = make_agent(name, playouts=_PLAY_PLAYOUTS,
                                           depth=_DIFFICULTY["depth"])
@@ -39,15 +41,11 @@ def play_mode():
             settings = {"enabled": True, "mode": "auto"}
             print("[difficulty] dynamic — the opponent will track ~1 sdev above your play")
     human_white = (input("Play as white? (y/n, default y): ").strip().lower() or "y") == "y"
-    try:
-        from terminal_board import TerminalChessBoard
-        adapter = AgentAdapter(move_fn, value_fn, elo_calibrator=calibrator,
-                               difficulty_settings=settings)
-        human_color = chess.WHITE if human_white else chess.BLACK
-        TerminalChessBoard(chess.Board(), adapter, human_color=human_color).start()
-    except Exception as e:
-        print(f"(rich board unavailable: {e}; simple mode)")
-        play_loop(move_fn, label, human_white)
+    from terminal_board import TerminalChessBoard
+    adapter = AgentAdapter(move_fn, value_fn, elo_calibrator=calibrator,
+                           difficulty_settings=settings)
+    human_color = chess.WHITE if human_white else chess.BLACK
+    TerminalChessBoard(chess.Board(), adapter, human_color=human_color).start()
 
 
 def train_mode():
