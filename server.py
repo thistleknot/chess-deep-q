@@ -595,6 +595,8 @@ PAGE = r"""<!doctype html>
       <div class="tile"><div class="k">Latest rung</div><div class="v" id="lad-latest">—</div></div>
       <div class="tile"><div class="k">Best rung</div><div class="v" id="lad-best">—</div></div>
       <div class="tile"><div class="k">Rungs measured</div><div class="v" id="lad-n">—</div></div>
+      <div class="tile"><div class="k">show screening/heartbeat rows</div>
+        <div class="v"><input id="lad-showall" type="checkbox" style="width:auto"></div></div>
     </div>
     <svg id="p-ladder" style="height:180px"></svg>
     <table class="lad" id="lad-table"></table>
@@ -752,7 +754,11 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 async function pollLadder(){
   try{
     const r=await fetch('/api/trend'); const j=await r.json();
-    const rows=(j.rows||[]).filter(x=>x.elo!=null);
+    // signal hygiene (operator 2026-07-14: baby-net screening rows buried the ladder):
+    // study trials + d2-greedy crown heartbeats are SCREENING noise, hidden by default
+    const noise=x=>/^trial\d+\b/.test(x.agent||'')||/d2-greedy \(live run\)/.test(x.agent||'');
+    const showAll=document.getElementById('lad-showall').checked;
+    const rows=(j.rows||[]).filter(x=>x.elo!=null&&(showAll||!noise(x)));
     const svg=document.getElementById('p-ladder');
     if(!rows.length){svg.innerHTML=''; document.getElementById('lad-table').innerHTML='';}
     else{
