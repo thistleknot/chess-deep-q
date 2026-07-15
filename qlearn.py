@@ -113,6 +113,21 @@ elif ENC == "k8":
     from kanerva_enc import K8_OUT as NIN_ENC
     def ENC_FN(board, _k=_k8, _e=encode_features):    # :Kanerva-809: expansion (bake set 5)
         return _k(_e(board))
+elif ENC == "tpst":
+    NIN_ENC = NIN + 2 * 768                # Merge 21 :Threat-planes:: pst-769 base ⊕ the
+    # operator's highlight-engine semantics as feature INTERACTIONS (piece × square ×
+    # threatened / × guarded). Hand feature defs only — no piece values anywhere; the
+    # objective prices the conjunctions (operator design 2026-07-14).
+    def ENC_FN(board, _e=encode, _n=NIN):
+        x = np.zeros(_n + 2 * 768, dtype=np.float32)
+        x[:_n] = _e(board)
+        for sq, piece in board.piece_map().items():
+            idx = (0 if piece.color == chess.WHITE else 384) + 64 * (piece.piece_type - 1) + sq
+            if board.is_attacked_by(not piece.color, sq):
+                x[_n + idx] = 1.0                        # this piece, this square, THREATENED
+            if board.is_attacked_by(piece.color, sq):
+                x[_n + 768 + idx] = 1.0                  # ... GUARDED
+        return x
 elif ENC == "kpst":
     NIN_ENC = 4 * NIN                      # Merge 20 :Kpst:: the pst-769 planes replicated per
     # WHITE-king quadrant bucket (2x2: file-half x rank-half) — hand-declared king-conditioned

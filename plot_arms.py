@@ -56,6 +56,7 @@ def live_rows():
                            ("organ phase-mix", "809", "bake3_phase"),
                            ("organ dis-gamma", "809", "bake3_disgamma"),
                            ("bake4 kpst 4-kingbucket", "809", "bake4_kpst"),
+                           ("bake5 tpst threat-planes", "809", "bake5_tpst"),
                            ("bake4 mlp64 crelu+adam", "capacity", "bake4_mlpcr"),
                            ("bake4 linear adam (ctl)", "capacity", "bake4_linadam")):
         p = f"data/{tag}.log"
