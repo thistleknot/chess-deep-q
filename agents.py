@@ -125,7 +125,7 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
         w, b = raw_weights(path)                     # ZCA identity-gated 809 conversion
         srch = importlib.import_module("rsearch4").Searcher(w, b)
         champ = ChampionAgent(srch, depth=depth)
-        return (f"champion(d{depth}, 1670-claims)", champ, champ.value)
+        return (f"champion(d{depth}, 1670-claims/1737-scout)", champ, champ.value)
     if name == "puct":
         path = "models/tower_puct.pt"
         if not os.path.exists(path):
