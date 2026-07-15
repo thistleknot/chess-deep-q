@@ -261,3 +261,17 @@ a 2-bit E6 add-on with expectations set low. NEVER reward (operator + S&B agree)
   canon: advancing generated before retreating; captures/killers/history taxonomy);
   coaching-classifier cousins exist (eval-delta based "brilliant/blunder" tools) —
   coverage-basis variant appears untried. Markov-redundancy caveat unchanged.
+
+## :SME-features: batch-1 verdicts (2026-07-14, duel ruler, 600g each vs fresh-seed control)
+
+- tpst threat/guard planes (+1536d): **-10 (-38..+17) TIE** — closed at this screen
+  (declared caveat: d2 duels subsume 1-ply threat knowledge; deep-lens re-screen =
+  optional follow-up).
+- hpst hanging planes (+768d): **+15 (-13..+43) TIE, leaning** — held for the
+  composition arm.
+- **amap attack maps (+128d): +51 (+23..+79) WIN — the FIRST feature set ever to beat
+  raw planes in this campaign.** Batch is monotone in information-per-dimension
+  (dilution theory holds). Seed-1 confirmation PRE-REGISTERED and queued (capacity
+  lesson: n=1 training runs need seed replication); queue frozen per win-rule; next
+  composition arm (amap+hanging vs amap) only after confirmation. Council checkpoint
+  logged (data/council.md).
