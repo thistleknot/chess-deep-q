@@ -5,7 +5,8 @@ This is the net whose measured ladder reads: crown 40.83, d7 60-game rung 1561
 (1466..1704) vs SF@1320, 200-game claims run on the ledger. Difficulty = search depth
 (the measured strength knob): the claims numbers are at depth 7.
 
-Usage: python play_champion.py [depth]   (default 7; ~0.3s/move at d7, ~1.5s at d9)
+Usage: python play_champion.py [depth]   (default 9 — the 1670-claims engine, ~1.5s/move;
+pass 7 for a faster ~1572-class opponent)
 Failure modes: missing/incompatible ckpt or ZCA identity failure -> SystemExit
 (corpus_gen.raw_weights refuses an unsafe whitening conversion).
 """
@@ -20,7 +21,7 @@ CKPT = "models/champion.pt"
 
 
 def main():
-    depth = int(sys.argv[1]) if len(sys.argv) > 1 else 7
+    depth = int(sys.argv[1]) if len(sys.argv) > 1 else 9
     w, b = raw_weights(CKPT)
     srch = importlib.import_module("rsearch4").Searcher(w, b)
     human_white = (input("Play as white? (y/n, default y): ").strip().lower() or "y") == "y"
