@@ -57,6 +57,9 @@ def live_rows():
                            ("organ dis-gamma", "809", "bake3_disgamma"),
                            ("bake4 kpst 4-kingbucket", "809", "bake4_kpst"),
                            ("bake5 tpst threat-planes", "809", "bake5_tpst"),
+                           ("bake5 hpst hanging-planes", "809", "bake5_hpst"),
+                           ("bake5 amap attack-maps", "809", "bake5_amap"),
+                           ("bake5 pst-769 fresh-seed CONTROL", "809", "bake5_pstfresh"),
                            ("bake4 mlp64 crelu+adam", "capacity", "bake4_mlpcr"),
                            ("bake4 linear adam (ctl)", "capacity", "bake4_linadam")):
         p = f"data/{tag}.log"

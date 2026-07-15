@@ -128,6 +128,31 @@ elif ENC == "tpst":
             if board.is_attacked_by(piece.color, sq):
                 x[_n + 768 + idx] = 1.0                  # ... GUARDED
         return x
+elif ENC == "hpst":
+    NIN_ENC = NIN + 768                    # Merge 21 arm B :Hanging-planes:: TRIZ nesting —
+    # piece × square × (THREATENED AND NOT GUARDED). The fork-blindness conjunction.
+    def ENC_FN(board, _e=encode, _n=NIN):
+        x = np.zeros(_n + 768, dtype=np.float32)
+        x[:_n] = _e(board)
+        for sq, piece in board.piece_map().items():
+            if (board.is_attacked_by(not piece.color, sq)
+                    and not board.is_attacked_by(piece.color, sq)):
+                x[_n + (0 if piece.color == chess.WHITE else 384)
+                  + 64 * (piece.piece_type - 1) + sq] = 1.0
+        return x
+elif ENC == "amap":
+    NIN_ENC = NIN + 128                    # Merge 21 arm C :Attack-maps:: TRIZ universality —
+    # per-square any-attack binary per side (operator's mobility/space/center features as
+    # LEARNABLE maps: no hand square-weights; the objective prices d4 itself).
+    def ENC_FN(board, _e=encode, _n=NIN):
+        x = np.zeros(_n + 128, dtype=np.float32)
+        x[:_n] = _e(board)
+        for sq in chess.SQUARES:
+            if board.is_attacked_by(chess.WHITE, sq):
+                x[_n + sq] = 1.0
+            if board.is_attacked_by(chess.BLACK, sq):
+                x[_n + 64 + sq] = 1.0
+        return x
 elif ENC == "kpst":
     NIN_ENC = 4 * NIN                      # Merge 20 :Kpst:: the pst-769 planes replicated per
     # WHITE-king quadrant bucket (2x2: file-half x rank-half) — hand-declared king-conditioned
