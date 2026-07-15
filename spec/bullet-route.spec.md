@@ -122,8 +122,19 @@ pipeline. Bridge (server.py, console):
    re-run manually.)
 3. Console defaults = full champion recipe + lineage `rep1`: the out-of-the-box button
    IS the from-scratch replication experiment (wseed → 30×1000 → bank → d9 rung).
-Claims-grade (200g) stays a deliberate second step on promising rungs — 60g scouts
-keep the loop <15-min-adjacent; the ladder table records everything either way.
+4. **Crown live-rungs** (`crown_live_rung`, default on): during training, each newly
+   banked confirmed crown (+0.5 bar or more) fires a ≤24-game deep rung tagged
+   `live-rung (provisional)` — goal-scale progress visible on the ladder DURING the
+   run. Provisional because SF's clock shares the CPU with the trainer; the idle-box
+   post-run rung is the honest number.
+5. **Auto-claims escalation** (`auto_claims_at`, default 1550; 0=off): if the post-run
+   60g scout's Elo ≥ the threshold, the 200-game claims run fires automatically —
+   the UI alone can mint a claims-grade 1600+ number (operator mandate 2026-07-14:
+   "mimic these results in our training ui"). Tag `<lineage> d<depth> CLAIMS auto`.
+6. **Auto-promote** (`auto_promote`, default OFF): only when the auto-claims row's CI
+   FLOOR strictly exceeds every prior ≥200g floor on the ladder does the lineage best
+   copy to models/champion.pt (logged). Default off — promotion is normally the
+   operator's call; the checkbox is the delegation.
 
 ## Acceptance
 

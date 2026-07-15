@@ -144,6 +144,15 @@ class TrainReq(BaseModel):
                                   # at this depth — closes the train->bank->MEASURE loop the
                                   # 1670 required. 0 = off.
     post_rung_games: int = 60     # ladder games for the auto-rung (60 = scout; 200 = claims)
+    crown_live_rung: bool = False # ALSO fire a (provisional, <=24g) deep rung on each new
+                                  # confirmed crown DURING training — goal-scale progress
+                                  # visible live on the ladder; post-run rung stays the
+                                  # honest number (mid-run SF shares CPU with the trainer)
+    auto_claims_at: int = 1550    # post-run scout Elo >= this -> auto-run the 200g CLAIMS
+                                  # (the UI alone mints claims-grade numbers); 0 = off
+    auto_promote: bool = False    # claims CI floor beats every prior >=200g floor ->
+                                  # copy lineage best to models/champion.pt (default OFF:
+                                  # promotion is the operator's call unless delegated here)
     deck: int = 0                 # (q) Merge 16 :Magic-deck: size in games (0 = off; reverted
                                   # by the M16 study verdict at trial scale — long runs only)
     # --- advanced knobs (API-only; the form doesn't render them, pydantic defaults apply) ---
@@ -334,22 +343,77 @@ def api_train_start(cfg: TrainReq):
     if cfg.post_rung_depth > 0 and cfg.algo != "ac":
         import threading
 
-        def _post_rung(proc, best_ckpt, depth, games, lineage):
-            # :Replication-bridge: step 2 — when training exits, the banked best sits the
-            # deep-search exam automatically (claims_rung.py -> rl_trend.jsonl), so the
-            # ladder plot and Champion tile move without a manual step. Dies with the
-            # server process (documented): re-run manually if the server restarted mid-run.
-            proc.wait()
+        def _run_rung(best_ckpt, depth, games, tag):
+            with open(os.path.join(ROOT, "data", "post_rung.log"), "a") as lg:
+                subprocess.run([PY, "claims_rung.py", best_ckpt, str(depth), str(games), tag],
+                               cwd=ROOT, stdout=lg, stderr=subprocess.STDOUT)
+
+        def _trend_rows():
+            try:
+                with open(os.path.join(ROOT, "data", "rl_trend.jsonl")) as fh:
+                    return [json.loads(ln) for ln in fh if ln.strip()]
+            except Exception:
+                return []
+
+        def _trend_row(tag):
+            for r in reversed(_trend_rows()):
+                if r.get("agent") == tag:
+                    return r
+            return None
+
+        def _post_rung(proc, best_ckpt, depth, games, lineage, crown_live,
+                       auto_at, promote):
+            # :Replication-bridge: step 2 — the banked best sits the deep-search exam
+            # automatically (claims_rung.py -> rl_trend.jsonl): the ladder plot and
+            # Champion tile move without a manual step. With crown_live, ALSO fires a
+            # rung each time the run banks a HIGHER confirmed crown mid-run, so
+            # goal-scale progress is visible DURING training (tagged live-provisional:
+            # SF timing shares the CPU with the trainer, so mid-run rungs read a touch
+            # high; the post-run rung on the idle box is the honest one). Dies with the
+            # server process (documented): re-run manually if the server restarted.
+            import torch
+            last_bar = -1.0
+            while proc.poll() is None:
+                if crown_live and os.path.exists(best_ckpt):
+                    try:
+                        bar = float(torch.load(best_ckpt, map_location="cpu").get("strength") or -1.0)
+                    except Exception:
+                        bar = last_bar
+                    if bar > last_bar + 0.5:           # a genuinely new crown, not jitter
+                        last_bar = bar
+                        _run_rung(best_ckpt, depth, min(games, 24),
+                                  f"{lineage or 'default'} crown {bar:.1f} d{depth} live-rung (provisional)")
+                proc.wait(timeout=None) if not crown_live else threading.Event().wait(300)
             if not os.path.exists(best_ckpt):
                 return
-            with open(os.path.join(ROOT, "data", "post_rung.log"), "a") as lg:
-                subprocess.run([PY, "claims_rung.py", best_ckpt, str(depth), str(games),
-                                f"{lineage or 'default'} d{depth} auto-rung"],
-                               cwd=ROOT, stdout=lg, stderr=subprocess.STDOUT)
+            tag = f"{lineage or 'default'} d{depth} auto-rung"
+            _run_rung(best_ckpt, depth, games, tag)
+            row = _trend_row(tag)
+            # :Replication-bridge: step 5 — scout clears the bar -> claims-grade run,
+            # no operator step (the UI alone mints the 1600+ number)
+            if auto_at > 0 and row and (row.get("elo") or 0) >= auto_at and games < 200:
+                ctag = f"{lineage or 'default'} d{depth} CLAIMS auto"
+                _run_rung(best_ckpt, depth, 200, ctag)
+                crow = _trend_row(ctag)
+                if promote and crow and crow.get("elo_lo"):
+                    # step 6 — promote ONLY on a strictly better claims floor than every
+                    # prior >=200g row (the ratchet, claims-grade)
+                    prior = max((r.get("elo_lo") or -10_000 for r in _trend_rows()
+                                 if r.get("agent") != ctag and (r.get("games") or 0) >= 200),
+                                default=-10_000)
+                    if crow["elo_lo"] > prior:
+                        import shutil
+                        shutil.copyfile(os.path.join(ROOT, best_ckpt) if not os.path.isabs(best_ckpt)
+                                        else best_ckpt,
+                                        os.path.join(ROOT, "models", "champion.pt"))
+                        with open(os.path.join(ROOT, "data", "post_rung.log"), "a") as lg:
+                            lg.write(f"AUTO-PROMOTED {best_ckpt} -> models/champion.pt "
+                                     f"(claims floor {crow['elo_lo']} > prior {prior})\n")
 
         threading.Thread(target=_post_rung,
                          args=(TRAIN_PROC, abs_ckpt.replace(".pt", "_best.pt"),
-                               cfg.post_rung_depth, cfg.post_rung_games, cfg.lineage),
+                               cfg.post_rung_depth, cfg.post_rung_games, cfg.lineage,
+                               cfg.crown_live_rung, cfg.auto_claims_at, cfg.auto_promote),
                          daemon=True).start()
     return {"ok": True, "pid": TRAIN_PROC.pid}
 
@@ -484,6 +548,9 @@ PAGE = r"""<!doctype html>
       <div><label>seed ckpt (fresh lineage)</label><input id="seed_ckpt" type="text" value="models/qlearn_wseed.pt"></div>
       <div><label>post-run ladder depth (0=off)</label><input id="post_rung_depth" type="number" value="9" min="0"></div>
       <div><label>post-run ladder games</label><input id="post_rung_games" type="number" value="60" min="2"></div>
+      <div><label>live crown rungs (provisional)</label><input id="crown_live_rung" type="checkbox" checked style="width:auto"></div>
+      <div><label>auto-claims at Elo (0=off)</label><input id="auto_claims_at" type="number" value="1550" min="0"></div>
+      <div><label>auto-promote champion</label><input id="auto_promote" type="checkbox" style="width:auto"></div>
     </div>
     <div class="row">
       <button class="alt" onclick="loadBest()">⬇ Load Optuna best</button>
@@ -573,7 +640,10 @@ async function startTrain(){
     surprise:document.getElementById('surprise').checked,grpo:document.getElementById('grpo').checked,
     replay_t:+val('replay_t'),surprise_k:+val('surprise_k'),deck:+val('deck'),
     seed_ckpt:val('seed_ckpt'),post_rung_depth:+val('post_rung_depth'),
-    post_rung_games:+val('post_rung_games')};
+    post_rung_games:+val('post_rung_games'),
+    crown_live_rung:document.getElementById('crown_live_rung').checked,
+    auto_claims_at:+val('auto_claims_at'),
+    auto_promote:document.getElementById('auto_promote').checked};
   const r=await fetch('/api/train/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
   const j=await r.json();
   document.getElementById('status').textContent=j.ok?`training started (pid ${j.pid})`:('busy: '+j.msg);
