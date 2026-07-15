@@ -328,6 +328,7 @@ class TerminalChessBoard:
             self.show_move_hint()
             return False
         elif command in ('undo', 'u'):
+            self.undo_count = getattr(self, 'undo_count', 0) + 1   # :Assist-provenance:
             self.undo_move()
             return False
         elif command in ('save', 's'):
@@ -559,6 +560,10 @@ class TerminalChessBoard:
             # Get AI's move suggestion
             hint_move = self.ai.get_best_move()
             self.ai.board = self.board  # Restore the original board
+            # :Assist-provenance:: hints are the CHAMPION's moves, not the human's —
+            # tracked so the skill estimate and the archived game stay honest
+            self.hint_count = getattr(self, 'hint_count', 0) + 1
+            self.last_hint_move = hint_move
             
             # Get the move notation
             from_square_name = chess.square_name(hint_move.from_square)
@@ -640,8 +645,15 @@ class TerminalChessBoard:
                 # board_history[-1] is the position before this human move; last_move is the move.
                 if self.difficulty_controller.enabled and self.last_move is not None \
                         and self.board_history:
-                    self.difficulty_controller.observe_player_move(
-                        self.board_history[-1], self.last_move)
+                    # :Assist-provenance:: a hinted move is the CHAMPION's skill, not
+                    # the player's — crediting it inflates the estimate and spirals the
+                    # opponent harder (measured feedback loop, operator-reported)
+                    if self.last_move == getattr(self, 'last_hint_move', None):
+                        pass
+                    else:
+                        self.difficulty_controller.observe_player_move(
+                            self.board_history[-1], self.last_move)
+                    self.last_hint_move = None
 
                 # AI makes its move
                 self.make_ai_move()
@@ -676,6 +688,10 @@ class TerminalChessBoard:
                 g.headers["White"] = "human" if self.human_color == chess.WHITE else "champion"
                 g.headers["Black"] = "champion" if self.human_color == chess.WHITE else "human"
                 g.headers["Date"] = time.strftime("%Y.%m.%d")
+                g.headers["Hints"] = str(getattr(self, 'hint_count', 0))
+                g.headers["Undos"] = str(getattr(self, 'undo_count', 0))
+                g.headers["Assisted"] = ("yes" if getattr(self, 'hint_count', 0)
+                                         or getattr(self, 'undo_count', 0) else "no")
                 node = g
                 for u in self.move_history:
                     node = node.add_variation(chess.Move.from_uci(u))
