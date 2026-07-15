@@ -38,6 +38,8 @@ class TerminalChessBoard:
             self.difficulty_controller.fixed_temperature = settings.get(
                 'fixed_temperature', self.difficulty_controller.fixed_temperature)
             self.difficulty_controller.offset = settings.get('offset', self.difficulty_controller.offset)
+            self.difficulty_controller.offset_sdev = settings.get(
+                'offset_sdev', self.difficulty_controller.offset_sdev)   # :Sigma-offset: dial
             self.difficulty_controller.reset()   # apply mode (fixed sets the starting temperature)
 
         # ELO calibrator (temperature/regret -> ELO), if one was loaded onto the AI.
@@ -661,4 +663,26 @@ class TerminalChessBoard:
                     
                     game_over = True
                     
+        # :Played-buffer: (operator 2026-07-14) — every FINISHED human game is archived
+        # as training experience. Human = opponent rung (same legal class as the SF
+        # ladder; KnightCap's original FICS recipe); targets stay self-generated — the
+        # human's moves shape the states, never the labels.
+        if game_over and self.move_history:
+            try:
+                import chess.pgn as _pgn
+                os.makedirs("data/human_games", exist_ok=True)
+                g = _pgn.Game()
+                g.headers["Result"] = self.board.result()
+                g.headers["White"] = "human" if self.human_color == chess.WHITE else "champion"
+                g.headers["Black"] = "champion" if self.human_color == chess.WHITE else "human"
+                g.headers["Date"] = time.strftime("%Y.%m.%d")
+                node = g
+                for u in self.move_history:
+                    node = node.add_variation(chess.Move.from_uci(u))
+                path = f"data/human_games/{time.strftime('%Y%m%d_%H%M%S')}.pgn"
+                with open(path, "w") as fh:
+                    fh.write(str(g))
+                print(f"(archived to the played buffer: {path})")
+            except Exception as e:
+                print(f"(played-buffer archive failed: {e})")
         print("\nThanks for playing!")

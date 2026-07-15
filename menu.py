@@ -38,8 +38,10 @@ def play_mode():
             print(f"[difficulty] fixed temperature {_DIFFICULTY['tau']:.2f} "
                   f"(≈{calibrator.policy_elo(_DIFFICULTY['tau']):.0f} Elo)")
         else:
-            settings = {"enabled": True, "mode": "auto"}
-            print("[difficulty] dynamic — the opponent will track ~1 sdev above your play")
+            settings = {"enabled": True, "mode": "auto",
+                        "offset_sdev": _DIFFICULTY.get("sigma", 1.0)}
+            print(f"[difficulty] dynamic — the opponent will track "
+                  f"~{_DIFFICULTY.get('sigma', 1.0):g} sdev above your play")
     human_white = (input("Play as white? (y/n, default y): ").strip().lower() or "y") == "y"
     from terminal_board import TerminalChessBoard
     adapter = AgentAdapter(move_fn, value_fn, elo_calibrator=calibrator,
@@ -139,6 +141,12 @@ def difficulty_mode():
         _DIFFICULTY = {"choice": "full", "tau": None, "depth": 9}
     else:
         _DIFFICULTY = dict(_DIFficulty_DEFAULT)
+        raw = input("Target sigma above your level (default 1.0; 1.5-2 = more pain): ").strip()
+        try:
+            if raw:
+                _DIFFICULTY["sigma"] = max(0.0, float(raw))
+        except ValueError:
+            pass
     print(f"champion difficulty: {_DIFFICULTY['choice']}"
           + (f" (tau {_DIFFICULTY['tau']:.2f})" if _DIFFICULTY["tau"] else "")
           + (f" (d{_DIFFICULTY['depth']})" if _DIFFICULTY["choice"] == "full" else ""))
@@ -151,16 +159,39 @@ def difficulty_mode():
             print("Unchanged.")
 
 
+def played_buffer_mode():
+    """:Played-buffer: — fine-tune a champion COPY on archived human games (labels stay
+    self-generated: own d2 search values + outcome, proven trivium blend). Promotion is
+    duel-gated, never automatic."""
+    import glob as _glob
+    import subprocess
+    import sys as _sys
+    n = len(_glob.glob("data/human_games/*.pgn"))
+    print(f"\nPlayed buffer: {n} archived game(s) (finished games auto-archive).")
+    if not n:
+        print("Play and finish a game first — it archives itself.")
+        return
+    if (input(f"Fine-tune champion copy on {n} game(s)? (y/n, default y): ").strip().lower() or "y") != "y":
+        return
+    subprocess.run([_sys.executable, "human_replay.py"], cwd=".")
+    print("Candidate: models/champion_hb.pt — verdict duel (600g vs champion):")
+    print("  python head2head.py kcz:models/champion_hb.pt kcz:models/champion.pt 600 hb_verdict")
+    if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) == "y":
+        subprocess.run([_sys.executable, "head2head.py", "kcz:models/champion_hb.pt",
+                        "kcz:models/champion.pt", "600", "hb_verdict"], cwd=".")
+
+
 def top_menu():
     """:Top-menu: — the four spec-governed modes."""
     while True:
         print("\n=========  Chess-RL  =========")
-        print("1. Play        — human vs the net+PUCT RL agent (or engine baseline)")
+        print("1. Play        — human vs the CHAMPION (or roster agents)")
         print("2. Train       — PUCT self-play (the :Stage-controller:)")
         print("3. Measure     — agent vs the Elo ladder")
-        print("4. Difficulty  — set play strength")
-        print("5. Exit")
-        c = input("Choose (1-5): ").strip()
+        print("4. Difficulty  — set play strength (dynamic tracks you)")
+        print("5. Learn from my games — :Played-buffer: fine-tune (duel-gated)")
+        print("6. Exit")
+        c = input("Choose (1-6): ").strip()
         if c == "1":
             play_mode()
         elif c == "2":
@@ -170,10 +201,12 @@ def top_menu():
         elif c == "4":
             difficulty_mode()
         elif c == "5":
+            played_buffer_mode()
+        elif c == "6":
             print("bye.")
             break
         else:
-            print("Enter 1-5.")
+            print("Enter 1-6.")
 
 
 def main():

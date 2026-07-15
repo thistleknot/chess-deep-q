@@ -180,3 +180,21 @@ trivium/Q8 blends (house pattern: anneal trust dials).
 Rule: an idea enters this ledger when voiced, gets a spec home + pre-registered test
 before any claim, and its status moves ONLY on measured verdicts (the honest-asterisk
 register applies here too — "winner" is a status this table assigns, not a prior).
+
+## :Played-buffer: (operator 2026-07-14 — idea #15, learn from human games)
+
+KnightCap-canonical (the donor engine trained on FICS humans): the human is an OPPONENT
+rung (same legal class as the SF ladder — shapes states, never labels); every training
+label is self-generated (own d2 search values + outcome, proven trivium blend 0.285/
+0.341/0.374, lambda 0.7). Pipeline, all operator-reachable (entrypoint law):
+1. Finished games auto-archive to data/human_games/ (terminal_board, PGN + result +
+   colors) — archive is part of Play, zero clicks.
+2. Menu option 5 "Learn from my games" -> human_replay.py: fine-tunes a champion COPY
+   (models/champion_hb.pt) on the buffer. Gate PASSED on 3 varied synthetic games
+   (win/loss/draw; loss decreases; candidate written).
+3. Promotion is DUEL-GATED, never automatic: champion_hb must beat champion on the
+   ruler (600g), then the ladder. Honest scale note: single games are noise vs the
+   30k-game corpus — value accrues over tens of games; human games are distribution
+   coverage self-play cannot generate (the hole-coverage lever).
+Also: :Sigma-offset: dial exposed in Difficulty (operator: +1sigma felt soft — the
+sigma is now a prompt, 1.5-2 = harder tracking).
