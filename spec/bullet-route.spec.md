@@ -239,3 +239,14 @@ material change. Placements:
    to the regret readout) and as a search move-ordering prior (behavior only). BANNED
    as reward shaping (S&B chess clause: rewarding subgoals teaches subgoal-hacking —
    sometimes the retreat IS the best move; the value function prices that itself).
+
+## Ledger idea #17: :Move-trichotomy: (operator 2026-07-14 — completes #16 into a partition)
+
+Every move classes as ADVANCE / NEUTRAL("draw") / RETREAT via the sign of the #16
+coverage+material delta; two binary flags encode all three (operator: "two classes
+covers all 3 states"; operator also pre-applied the no-reward rule unprompted).
+Placements: (1) FREE derivative of E6 scalars (sign of delta — one line); (2) coaching
+UI cue + played-buffer analytics (move-class mix vs regret); (3) search move-ordering
+prior (behavior only). Declared caveat: as a STATE-value feature it is Markov-redundant
+(the position screens off the last move; canon cousin = tempo bonus) — if ever tested,
+a 2-bit E6 add-on with expectations set low. NEVER reward (operator + S&B agree).
