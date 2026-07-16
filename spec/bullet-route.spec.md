@@ -485,3 +485,15 @@ fresh arm7b checkpoints).
 - Also: round-robin among the wave-1 arms (kamap/cmap/amaps pairings, 50g
   each) to complete the operator's tournament-standings artifact; pooled
   150g/net records read as trends only.
+
+### :Arm7-screen: round-robin standings (2026-07-16, 50g/pairing, trends only)
+
+| # | Net | Pooled /3 matches | Notes |
+|---|---|---|---|
+| 1 | amap (control) | 1.80 | holds the bracket |
+| 2 | kamap | 1.69 | beat cmap +108 (+8..+207), amaps +70 (−27..+167) |
+| 3 | amaps | 1.48 | beat cmap +85-lean |
+| 4 | cmap | 1.03 | lost all three pairings — signed loser |
+
+Fully transitive ordering; bracket agrees with the control-duels. arm7b
+600g-probe lanes (26/27/28) launched on the same seeds.
