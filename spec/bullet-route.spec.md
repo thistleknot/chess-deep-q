@@ -411,3 +411,40 @@ label updated; load+move verified. The +10 pooled finisher games merge into the
 trend row asynchronously (can only confirm at this score). GOAL CLOSED: the
 champion is built on the operator's features. Follow-up defect: human_replay.py
 asserts enc=="kc" — port the played-buffer lane before next use.
+
+## :Arm7-screen: (2026-07-16 — operator: "8 hours... think triz + six hats, design experiments, tournament style")
+
+Meta-read driving the design: representation beats algorithm (features 1-for-4
+confirmed — amap; mechanisms 0-for-7), and every ADD-ON tested on top of amap
+so far has tied at the 50g resolution (amaph leaning, amapd dead, dmap under).
+So: three FEATURE arms, chosen by TRIZ move, all screened against the standing
+arm6_amap control (same protocol, same seed — reused, not retrained):
+
+| Arm | Dims | TRIZ move | Question |
+|---|---|---|---|
+| `arm7_kamap` (kc-809 ⊕ amap-128) | 937 | merging | K1: do the KnightCap hand terms (king safety, pawn structure — the OLD champion's edge) add on top of coverage? Highest prior: both blocks independently confirmed; lowest expected bit-overlap of any candidate. future_exploration #1. |
+| `arm7_cmap` (pst-769 ⊕ count-maps-128) | 897 | local quality | C1: do graded attacker COUNTS beat binary coverage at EQUAL dims (info-per-dim, ledger idea #6)? count = popcount(attackers)/4, declared. |
+| `arm7_amaps` (amap-897 ⊕ E6-scalars-24) | 921 | segmentation/compression | S1: does the compressed protected/threatened signal add on top of coverage? E6 per :Retreat: — per-side × per-piece-type PROTECTED and THREATENED counts (/8, 24 floats). The dilution-proof retry of the leaning hpst arm. Covered-square COUNT deliberately DROPPED: it is a linear sum of amap bits — inside a linear net's span by construction, adds nothing. |
+
+Door NOT taken, with the argument logged: dmap-XOR-amap re-basing is span-
+equivalent to amap⊕dmap for a linear model — amapd (+0 dead tie) already
+measured that function space; do-not-retry holds without a new instrument.
+
+Pre-registration (exact arm5/arm6 protocol, SEED=1 matched):
+- Control: `models/arm6_amap_best.pt` (trained 2026-07-15 at this exact
+  protocol) — no retrain; duels are seed- and protocol-matched.
+- Seeds: torch.manual_seed(20), fresh ValueNet('linear', 64, nin), bundle
+  {state_dict, arch, enc, zca:False, cum_games:0} → models/arm7_<name>.pt.
+- Train: `qlearn.py 200 1` via lane.py; KC_FAITHFUL=1 OPP=graded ELO_GAMES=0
+  EPOCH_ELO_GAMES=12 CONFIRM=1 PATIENCE=99 SEED=1 RSEARCH_DEPTH=0
+  (python-beam targets); one lane = one launcher process (lane-14 lesson);
+  cores 0-2 / 3-5 / 6-8 (thermal law, 9/12).
+- Duels (50g law, sharded H2H_SHARDS=6, sequential on cores 0-5):
+  K1 kamap vs arm6_amap; C1 cmap vs arm6_amap; S1 amaps vs arm6_amap.
+- Verdict rule (unchanged): band excludes zero → SEED=2 confirm pair fires
+  before anything else; band spans zero → park, ledger, do-not-retry.
+- Gate battery per encoder (≥3 varied FENs) before any training: kamap
+  prefix==kc/suffix==amap; cmap bit-consistency with amap (count>0 ⇔ bit)
+  + hand-counted startpos values + black mirror; amaps prefix==amap +
+  hand-counted startpos scalars (8/8 pawns protected → 1.0, rooks 0,
+  threatened all 0) + mirror.
