@@ -14,7 +14,14 @@ encoders.py, seed, console option). Pipeline: screening duel vs amap control
 (15-min train + 3-min sharded duel) → if band excludes zero, seed-confirm →
 champion-recipe school run (~2.5 h) → pooled d9 scout → gate at floor 1724.
 
-## 2. dmap — destination maps (per-piece move availability) (operator concept, 2026-07-15)
+## 2. dmap — destination maps — SCREENED & PARKED (2026-07-15 evening)
+VERDICT: dmap vs amap **−35 (−130..+61) tie**; amapd (amap⊕dmap) vs amap
+**+0 (−95..+95) dead tie** — both 50g bands span zero, no seed-confirm per
+pre-registration (spec :Dmap-screen:). Mobility neither beats nor adds to
+coverage at this resolution; non-pawn destinations overlap amap's attack bits
+too heavily. Residual idea if ever re-opened: divergent-bits-only variant
+(dmap XOR amap — pawn pushes + blocked-attack squares only). Original concept
+below for the record.
 **For every piece, the set of squares it is available to move into.** This is
 the missing half of the coverage idea: amap says which squares we ATTACK;
 dmap says where our pieces can actually GO.

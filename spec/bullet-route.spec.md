@@ -346,6 +346,25 @@ Pre-registration (exact arm5 protocol, SEED=1 matched, seeds torch.manual_seed(2
   rank-1 dests; blocked single+double pushes; pawn-capture-needs-enemy; black
   mirror; amapd prefix==amap / suffix==dmap positive control.
 
+VERDICT (2026-07-15 evening, both 50g sharded, input SHAs on the verdict lines):
+- D1 dmap vs amap: **−35 (95% −130..+61), 98% decisive — TIE, leaning under**;
+  mobility alone does not beat coverage.
+- D2 amapd vs amap: **+0 (95% −95..+95), 92% decisive — DEAD TIE**; mobility
+  adds nothing detectable ON TOP of coverage at the 50g spend.
+Both bands span zero → per pre-registration NO seed-confirm fires; dmap PARKS.
+Consistent with dilution theory + prior evidence: non-pawn destinations ≈
+attacked squares (high overlap with amap bits), E5 counts were already flat,
+amaph (hanging⊕amap) was flat — amap appears to already carry the coverage
+signal. Re-open only at a finer resolution (explicit operator H2H_CAP raise)
+or with the divergent-bits-only variant (dmap XOR amap: pushes/blockers only,
+~2×64 sparse) as a fresh E-queue entry.
+Incident note: the serialized launcher's queued duplicate dmap lane slipped the
+conflict guard (its twin was already 'done') and was killed pre-write;
+arm6_dmap_best restored from the confirmed lane-12 save. Guard gap logged:
+conflict check compares against RUNNING rows only — queued duplicate launches
+of COMPLETED work are not refused. Mitigation: never queue launches behind a
+blocking `lane.py run`; one lane = one launcher process.
+
 ## :Lane-registry: (2026-07-15 — operator: "serious code quality problems")
 
 Root cause of the zombie incident: chains triggered by process-name greps +
