@@ -1,0 +1,98 @@
+"""DecisiveGameSampler — rejection-sample uniform-random games, keep only checkmate-under-cap games.
+
+PARKED MODULE (archived as random_mate_rl.py_ — the trailing underscore makes it non-importable on purpose:
+if some code accidentally imports it, the import fails loudly and the fix is obvious — comment out that
+import). It is the SEED of Merge 1 (spec/self-improvement-loop.spec.md): the CEM / policy-iteration loop
+keeps only decisive (±1-labeled) games in its buffer and fits a value on them. Reactivate: rename .py_ -> .py.
+
+Built on Merge 0's ChessEnv (spec/environment.spec.md) so state transitions and terminal scoring have a
+single owner — the sampler only adds the rejection rule (decisive AND within max_turns full moves).
+
+Usage (when active): python random_mate_rl.py generate [n_attempts] [max_turns] [out.jsonl]
+"""
+import sys
+import os
+import json
+import time
+import random
+
+from chess_rl import ChessEnv, random_policy
+
+
+class DecisiveGameSampler:
+    """Uniform-random self-play, keeping only games that reach checkmate within max_turns full moves.
+
+    Each kept game yields one row per position, labeled with the white-absolute outcome z (+1 white mated,
+    -1 black mated) — the clean-signal buffer Merge 1 trains on. Draws and over-cap games are rejected.
+
+    Require: chess_rl.ChessEnv (Merge 0). Guarantee: every emitted row comes from a game that ended in mate
+    at fullmove <= max_turns. Maintain: the env is the sole owner of transitions and terminal scoring.
+    """
+
+    def __init__(self, max_turns=60, seed=0):
+        self.max_turns = max_turns
+        self.rng = random.Random(seed)
+        self.env = ChessEnv(ply_cap=2 * max_turns)   # > max_turns full moves -> draw -> rejected
+
+    def play_one(self):
+        """One random game. Return (z, fens) iff checkmate within max_turns full moves, else None."""
+        board = self.env.reset()
+        fens = [board.fen()]
+        done, reward = False, 0.0
+        while not done:
+            board, reward, done = self.env.step(random_policy(board, self.rng))
+            fens.append(board.fen())
+        if reward == 0.0:                            # draw / insufficient / repetition / ply cap
+            return None
+        if board.fullmove_number > self.max_turns:
+            return None
+        return reward, fens
+
+    def sample(self, n_attempts):
+        """Yield labeled rows {fen, z} from the decisive games among n_attempts random games.
+
+        The in-memory path for Merge 1: `buffer = list(sampler.sample(n))` builds the clean ±1 buffer
+        without touching disk.
+        """
+        for _ in range(n_attempts):
+            res = self.play_one()
+            if res is None:
+                continue
+            z, fens = res
+            for fen in fens:
+                yield {"fen": fen, "z": z}
+
+    def to_jsonl(self, n_attempts, out_path):
+        """Rejection-sample n_attempts games, write kept positions to out_path. Return (kept_games, rows)."""
+        t = time.time()
+        kept, rows = 0, 0
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        with open(out_path, "w") as fh:
+            for _ in range(n_attempts):
+                res = self.play_one()
+                if res is None:
+                    continue
+                kept += 1
+                z, fens = res
+                for fen in fens:
+                    fh.write(json.dumps({"fen": fen, "z": z}) + "\n")
+                    rows += 1
+        dt = time.time() - t
+        print(f"attempts {n_attempts} | kept {kept} ({kept/n_attempts:.1%}) | rows {rows} | {dt:.0f}s")
+        print(f"wrote {out_path}")
+        return kept, rows
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "generate"
+    if mode == "generate":
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 20000
+        mt = int(sys.argv[3]) if len(sys.argv) > 3 else 60
+        out = sys.argv[4] if len(sys.argv) > 4 else "data/random_mate.jsonl"
+        DecisiveGameSampler(max_turns=mt).to_jsonl(n, out)
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()
