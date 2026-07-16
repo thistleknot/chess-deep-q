@@ -14,28 +14,28 @@ encoders.py, seed, console option). Pipeline: screening duel vs amap control
 (15-min train + 3-min sharded duel) → if band excludes zero, seed-confirm →
 champion-recipe school run (~2.5 h) → pooled d9 scout → gate at floor 1724.
 
-## 2. mmap — move-availability maps (operator concept, 2026-07-15)
+## 2. dmap — destination maps (per-piece move availability) (operator concept, 2026-07-15)
 **For every piece, the set of squares it is available to move into.** This is
 the missing half of the coverage idea: amap says which squares we ATTACK;
-mmap says where our pieces can actually GO.
+dmap says where our pieces can actually GO.
 Lineage: the operator raised this in the ORIGINAL coverage discussion — it was
 captured compressed as E5 in the spec's E-queue (quantized legal-move COUNT per
-piece-square, 2026-07-14). mmap is the uncompressed form: the destination
+piece-square, 2026-07-14). dmap is the uncompressed form: the destination
 SQUARES themselves, not just how many. E5 stays as the dilution-proof fallback
 if the maps lose on info-per-dim. They differ exactly where chess
 knowledge lives — pawn pushes (moves, not attacks), pins and blockers
 (attacked-but-unreachable), castling, and squares covered by an enemy piece.
 Two encodings to screen:
-- **mmap-128**: union of legal destinations per side (2×64), amap-symmetric —
+- **dmap-128**: union of legal destinations per side (2×64), amap-symmetric —
   the direct sibling of the confirmed winner; total 897 dims again.
-- **mmap-768**: destinations keyed by piece type × side (12×64) — richer, but
+- **dmap-768**: destinations keyed by piece type × side (12×64) — richer, but
   dilution risk per the info-per-dim finding; screen only if 128 shows signal.
 Cost note: amap was free (the eval already computes attack unions); legal
 destinations need movegen at every leaf — use PSEUDO-legal destination bits
 first (near-free from the same attack pass + pawn pushes), full-legal only if
 the screen pays. Pipeline: same as any feature lane — 20g explore / 50g screen
 vs the amap champion encoding, seed-confirm, then champion recipe. Natural
-combination cell: amap ⊕ mmap (attack + mobility, 1025 dims) via the
+combination cell: amap ⊕ dmap (attack + mobility, 1025 dims) via the
 factorial-tournament method.
 
 ## 3. Stronger anchor rungs — instrument before strength
