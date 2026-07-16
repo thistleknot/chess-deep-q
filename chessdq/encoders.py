@@ -109,6 +109,52 @@ def _amapd(board, _a=_amap, _d=_dmap, _n=NIN):
     return x
 
 
+def _kamap(board, _kc=encode_features, _a=_amap, _n=NIN, _nf=NFEAT):
+    # :Arm7-screen: K1 (TRIZ merging): kc-809 (KnightCap hand terms — the OLD
+    # champion's edge) ⊕ amap-128 (coverage — the NEW champion's edge) = 937.
+    # Both blocks independently confirmed winners; future_exploration #1.
+    x = np.zeros(_nf + 128, dtype=np.float32)
+    x[:_nf] = _kc(board)
+    x[_nf:] = _a(board)[_n:]
+    return x
+
+
+def _cmap(board, _e=encode, _n=NIN):
+    # :Arm7-screen: C1 (TRIZ local quality, ledger idea #6 quantized floats):
+    # amap's binary any-attack bits upgraded to graded attacker COUNTS at the
+    # SAME dims — popcount(attackers)/4, declared. Info-per-dim test.
+    x = np.zeros(_n + 128, dtype=np.float32)
+    x[:_n] = _e(board)
+    for sq in chess.SQUARES:
+        w = chess.popcount(board.attackers_mask(chess.WHITE, sq))
+        b = chess.popcount(board.attackers_mask(chess.BLACK, sq))
+        if w:
+            x[_n + sq] = w / 4.0
+        if b:
+            x[_n + 64 + sq] = b / 4.0
+    return x
+
+
+def _amaps(board, _a=_amap, _n=NIN):
+    # :Arm7-screen: S1 (TRIZ compression): amap ⊕ E6 coverage-scalars (24) —
+    # per-side × per-piece-type PROTECTED (defended own man) and THREATENED
+    # counts, /8 quantized (:Retreat: ledger #16; the dilution-proof retry of
+    # the leaning hpst arm). Covered-square COUNT deliberately dropped: a
+    # linear sum of amap bits is already inside a linear net's span.
+    # Layout per side ci: [protected pt1..6, threatened pt1..6] at off+12*ci.
+    x = np.zeros(_n + 128 + 24, dtype=np.float32)
+    x[:_n + 128] = _a(board)
+    off = _n + 128
+    for sq, piece in board.piece_map().items():
+        ci = 0 if piece.color == chess.WHITE else 1
+        pt = piece.piece_type - 1
+        if board.is_attacked_by(piece.color, sq):
+            x[off + 12 * ci + pt] += 0.125
+        if board.is_attacked_by(not piece.color, sq):
+            x[off + 12 * ci + 6 + pt] += 0.125
+    return x
+
+
 def _kpst(board, _e=encode, _n=NIN):
     # Merge 20 :Kpst:: pst-769 planes per WHITE-king quadrant (file-half × rank-half)
     x = _e(board)
@@ -137,6 +183,12 @@ def get(name):
         return _dmap, NIN + 128
     if name == "amapd":
         return _amapd, NIN + 128 + 128
+    if name == "kamap":
+        return _kamap, NFEAT + 128
+    if name == "cmap":
+        return _cmap, NIN + 128
+    if name == "amaps":
+        return _amaps, NIN + 128 + 24
     if name == "kpst":
         return _kpst, 4 * NIN
     if name == "hk":
@@ -161,4 +213,5 @@ def get(name):
         from chessdq.kanerva_enc import encode_kanerva, K_OUT
         return encode_kanerva, K_OUT
     raise ValueError(f"unknown encoder '{name}' "
-                     "(pst | kc | tpst | hpst | amap | amaph | dmap | amapd | kpst | hk | kx | k8 | nk)")
+                     "(pst | kc | tpst | hpst | amap | amaph | dmap | amapd | kamap | cmap | amaps"
+                     " | kpst | hk | kx | k8 | nk)")
