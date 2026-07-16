@@ -48,3 +48,20 @@ surprise, spec/relative-reward.spec.md).
   3-trial study COMPLETED (best 892 = proven parms + replay_t 1.0, strongest clean-regime
   trial to date); arm superseded by Merge 16 full stack (spec/full-stack.spec.md) which
   includes all its machinery + the magic deck. Archived 2026-07-12.
+
+## Feature-screen ledger (screening tier, do-not-retry without new conditions)
+Everything below screened against a matched fresh-seed control on the duel ruler
+and PARKED (band spans zero) or CONFIRMED. Retrying any parked item requires an
+explicitly finer instrument (operator H2H_CAP raise) or a changed variant —
+never a plain re-run.
+- tpst threat/guard planes (+1536d) — TIE −10 (−38..+17), 2026-07-14.
+- hpst hanging planes (+768d) — TIE +15 (−13..+43), 2026-07-14; composition
+  amaph (amap⊕hanging) also flat — hanging adds nothing over coverage.
+- **amap attack maps (+128d) — CONFIRMED +51/+72 two seeds, 2026-07-15 → CHAMPION.**
+- backup-λ (mellowmax soft backup, operator concept) — tie solo (+0), stack
+  unconfirmed at seed-2 (pooled spans zero), 2026-07-15; mechanisms 0-for-7.
+- dmap destination maps (mobility): alone −35 (−130..+61) TIE; **on top of amap
+  +0 (−95..+95) DEAD TIE**, 2026-07-15 evening — mobility rides inside coverage
+  (~90% bit overlap). Re-open variant only: dmap XOR amap (pushes+blocked bits).
+- E5 per-piece mobility COUNTS — the compressed form; superseded by the dmap
+  screen result (the map version tied ⇒ counts stay parked).
