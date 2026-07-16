@@ -17,7 +17,12 @@ champion-recipe school run (~2.5 h) → pooled d9 scout → gate at floor 1724.
 ## 2. mmap — move-availability maps (operator concept, 2026-07-15)
 **For every piece, the set of squares it is available to move into.** This is
 the missing half of the coverage idea: amap says which squares we ATTACK;
-mmap says where our pieces can actually GO. They differ exactly where chess
+mmap says where our pieces can actually GO.
+Lineage: the operator raised this in the ORIGINAL coverage discussion — it was
+captured compressed as E5 in the spec's E-queue (quantized legal-move COUNT per
+piece-square, 2026-07-14). mmap is the uncompressed form: the destination
+SQUARES themselves, not just how many. E5 stays as the dilution-proof fallback
+if the maps lose on info-per-dim. They differ exactly where chess
 knowledge lives — pawn pushes (moves, not attacks), pins and blockers
 (attacked-but-unreachable), castling, and squares covered by an enemy piece.
 Two encodings to screen:
