@@ -497,3 +497,17 @@ fresh arm7b checkpoints).
 
 Fully transitive ordering; bracket agrees with the control-duels. arm7b
 600g-probe lanes (26/27/28) launched on the same seeds.
+
+### :Arm7b-data-probe: VERDICT (2026-07-16)
+
+- kamap600 vs amap600: **−78 (95% −175..+20) — TIE, leaning under** (was −42 @200g).
+- amaps600 vs amap600: **+14 (95% −81..+109) — TIE** (was −28 @200g).
+**H_data REFUTED for these features**: tripling the training spend moved neither
+band materially; the 200g screen was not hiding wins here. The arm7 parks are
+clean. Standing conclusion strengthens: amap already spans the linear-net
+coverage signal — the campaign is at a REPRESENTATION PLATEAU for pst-adjacent
+add-ons at this model class; next unlocks live elsewhere (nonlinear capacity at
+10× corpus, stronger anchors, or depth) — all already parked doors requiring
+explicit operator go. Note: 600g absolute objective rose for every net
+(579→714-775 pooled proxy) — more data helps everyone, it just doesn't
+re-order these encodings.
