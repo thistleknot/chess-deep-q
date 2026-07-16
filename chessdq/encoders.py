@@ -70,6 +70,45 @@ def _amaph(board, _a=_amap, _n=NIN):
     return x
 
 
+def _dmap(board, _e=encode, _n=NIN):
+    # :Dmap-screen:: per-square CAN-MOVE-INTO bits per side (operator's per-piece
+    # move-availability concept; E5 = its count compression). PSEUDO-legal by
+    # declaration: attacks minus own men (non-pawns), pawn captures onto enemy
+    # men, single/double pushes through empty squares; no EP, no castling,
+    # pins/check ignored (same legality-blindness as amap's is_attacked_by).
+    x = np.zeros(_n + 128, dtype=np.float32)
+    x[:_n] = _e(board)
+    occ_all = board.occupied
+    for ci, color in enumerate((chess.WHITE, chess.BLACK)):
+        own = board.occupied_co[color]
+        opp = board.occupied_co[not color]
+        dest = 0
+        for sq in chess.scan_forward(own & ~board.pawns):
+            dest |= board.attacks_mask(sq) & ~own
+        for sq in chess.scan_forward(own & board.pawns):
+            dest |= board.attacks_mask(sq) & opp
+        pawns = own & board.pawns
+        if color == chess.WHITE:
+            one = ((pawns << 8) & ~occ_all) & chess.BB_ALL
+            dest |= one | (((one & chess.BB_RANK_3) << 8) & ~occ_all)
+        else:
+            one = (pawns >> 8) & ~occ_all
+            dest |= one | (((one & chess.BB_RANK_6) >> 8) & ~occ_all)
+        off = _n + 64 * ci
+        for sq in chess.scan_forward(dest & chess.BB_ALL):
+            x[off + sq] = 1.0
+    return x
+
+
+def _amapd(board, _a=_amap, _d=_dmap, _n=NIN):
+    # :Dmap-screen: composition: amap (coverage, the confirmed winner) ⊕ dmap
+    # (mobility) = 1025d — does WHERE-WE-CAN-GO add on top of WHAT-WE-ATTACK?
+    x = np.zeros(_n + 128 + 128, dtype=np.float32)
+    x[:_n + 128] = _a(board)
+    x[_n + 128:] = _d(board)[_n:]
+    return x
+
+
 def _kpst(board, _e=encode, _n=NIN):
     # Merge 20 :Kpst:: pst-769 planes per WHITE-king quadrant (file-half × rank-half)
     x = _e(board)
@@ -94,6 +133,10 @@ def get(name):
         return _amap, NIN + 128
     if name == "amaph":
         return _amaph, NIN + 128 + 768
+    if name == "dmap":
+        return _dmap, NIN + 128
+    if name == "amapd":
+        return _amapd, NIN + 128 + 128
     if name == "kpst":
         return _kpst, 4 * NIN
     if name == "hk":
@@ -118,4 +161,4 @@ def get(name):
         from chessdq.kanerva_enc import encode_kanerva, K_OUT
         return encode_kanerva, K_OUT
     raise ValueError(f"unknown encoder '{name}' "
-                     "(pst | kc | tpst | hpst | amap | amaph | kpst | hk | kx | k8 | nk)")
+                     "(pst | kc | tpst | hpst | amap | amaph | dmap | amapd | kpst | hk | kx | k8 | nk)")

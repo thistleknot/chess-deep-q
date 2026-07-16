@@ -323,6 +323,29 @@ a 2-bit E6 add-on with expectations set low. NEVER reward (operator + S&B agree)
   port planning so amap can ride the d9 claims engine — the path to a features-equipped
   champion challenger. E-queue unfreezes per win-rule (E6 coverage-scalars next).
 
+## :Dmap-screen: (operator 2026-07-15 evening — "test those features out now just like we did before")
+
+Feature: **dmap destination maps** — per-square CAN-MOVE-INTO bits per side
+(operator's per-piece move-availability concept; E5 was its count compression).
+Definition (PSEUDO-legal, declared): non-pawn destinations = attacks minus own
+men; pawn destinations = captures onto enemy men + single/double pushes through
+empty squares; NO en passant, NO castling, pins/check ignored (same
+legality-blindness as amap's is_attacked_by — and a free native port later).
+
+Pre-registration (exact arm5 protocol, SEED=1 matched, seeds torch.manual_seed(20)):
+- Arms: `arm6_amap` (897, fresh control = current-best encoding), `arm6_dmap`
+  (897: pst-769 ⊕ dmap-128), `arm6_amapd` (1025: amap ⊕ dmap composition).
+- Train: `qlearn.py 200 1`, KC_FAITHFUL=1 OPP=graded EPOCH_ELO_GAMES=12
+  CONFIRM=1 PATIENCE=99, python-beam targets (RSEARCH_DEPTH=0), via lane.py.
+- Duels (50g law, sharded): D1 `arm6_dmap` vs `arm6_amap` (is mobility ≥
+  coverage?); D2 `arm6_amapd` vs `arm6_amap` (does mobility ADD to the best?).
+- Verdict rule: band excludes zero → seed-confirm fires (SEED=2 pair) before
+  any native-port/champion-recipe step; band spans zero → no detectable effect
+  at the 50g spend, park (screens kill, never confirm).
+- Encoder gate battery (pre-launch, ≥3 varied FENs): startpos push/knight/no-
+  rank-1 dests; blocked single+double pushes; pawn-capture-needs-enemy; black
+  mirror; amapd prefix==amap / suffix==dmap positive control.
+
 ## :Lane-registry: (2026-07-15 — operator: "serious code quality problems")
 
 Root cause of the zombie incident: chains triggered by process-name greps +
