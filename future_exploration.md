@@ -14,23 +14,42 @@ encoders.py, seed, console option). Pipeline: screening duel vs amap control
 (15-min train + 3-min sharded duel) → if band excludes zero, seed-confirm →
 champion-recipe school run (~2.5 h) → pooled d9 scout → gate at floor 1724.
 
-## 2. Stronger anchor rungs — instrument before strength
+## 2. mmap — move-availability maps (operator concept, 2026-07-15)
+**For every piece, the set of squares it is available to move into.** This is
+the missing half of the coverage idea: amap says which squares we ATTACK;
+mmap says where our pieces can actually GO. They differ exactly where chess
+knowledge lives — pawn pushes (moves, not attacks), pins and blockers
+(attacked-but-unreachable), castling, and squares covered by an enemy piece.
+Two encodings to screen:
+- **mmap-128**: union of legal destinations per side (2×64), amap-symmetric —
+  the direct sibling of the confirmed winner; total 897 dims again.
+- **mmap-768**: destinations keyed by piece type × side (12×64) — richer, but
+  dilution risk per the info-per-dim finding; screen only if 128 shows signal.
+Cost note: amap was free (the eval already computes attack unions); legal
+destinations need movegen at every leaf — use PSEUDO-legal destination bits
+first (near-free from the same attack pass + pawn pushes), full-legal only if
+the screen pays. Pipeline: same as any feature lane — 20g explore / 50g screen
+vs the amap champion encoding, seed-confirm, then champion recipe. Natural
+combination cell: amap ⊕ mmap (attack + mobility, 1025 dims) via the
+factorial-tournament method.
+
+## 3. Stronger anchor rungs — instrument before strength
 SF@1320 saturates above ~1700 (floors pile up at score>0.9); wins beyond the
 current champion are statistically invisible. Add SF@1500 and SF@1700 rungs to
 the pooled ladder (UCI_Elo settings; same 50-game law). Do this BEFORE any new
 strength arm or its result can't be measured.
 
-## 3. Deathmatch (free curiosity): old champion vs new
+## 4. Deathmatch (free curiosity): old champion vs new
 kc-1670 (models/champion_backup_kc1670.pt) vs amap champion, head-to-head d9,
 50 games on the duel ruler — the direct band for "how much better is my net",
 immune to anchor saturation. rs:<depth>: spec form in head2head.
 
-## 4. E-queue canon features (screening tier only)
+## 5. E-queue canon features (screening tier only)
 E6 coverage-scalars first (operator's retreat concept compressed: ~24 floats,
 dilution-proof); then outposts/passed-pawn detail as explicit terms. Each: one
 50-game screen vs the current champion encoding, kill fast per the law.
 
-## 5. Played-buffer lane port (small defect, known)
+## 6. Played-buffer lane port (small defect, known)
 human_replay.py still asserts enc=="kc" — port to amap/no-ZCA so "Learn from my
 games" (menu 5) works against the new champion. ~15 lines.
 

@@ -226,12 +226,19 @@ class TerminalChessBoard:
                 elif square in guarded_squares:
                     bg_color = Back.CYAN
                 
-                # Determine text color based on piece color
+                # Ink follows CONTRAST, side follows GLYPH (filled ♜ vs outline ♖).
+                # Black ink on the dark base squares made black pieces invisible.
+                light_bgs = (Back.YELLOW, Back.LIGHTYELLOW_EX, Back.CYAN,
+                             Back.GREEN, Back.WHITE, Back.LIGHTWHITE_EX)
                 if piece:
-                    text_color = Fore.WHITE if piece.color == chess.WHITE else Fore.BLACK
-                    # For better contrast on certain backgrounds
-                    if bg_color in [Back.YELLOW, Back.LIGHTYELLOW_EX, Back.CYAN]:
+                    if bg_color in light_bgs:
                         text_color = Fore.BLACK
+                    elif piece.color == chess.WHITE:
+                        text_color = Fore.LIGHTWHITE_EX
+                    else:
+                        # black piece on a dark square: bright gold keeps it visible
+                        # and still distinct from the white set
+                        text_color = Fore.LIGHTYELLOW_EX
                 else:
                     text_color = Fore.WHITE
                 
