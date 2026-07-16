@@ -448,3 +448,40 @@ Pre-registration (exact arm5/arm6 protocol, SEED=1 matched):
   + hand-counted startpos values + black mirror; amaps prefix==amap +
   hand-counted startpos scalars (8/8 pawns protected → 1.0, rooks 0,
   threatened all 0) + mirror.
+
+### :Arm7-screen: VERDICT (2026-07-16, all 50g sharded, input SHAs on verdict lines)
+
+- K1 kamap vs amap: **−42 (95% −138..+54), 100% decisive — TIE, leaning under.**
+  The merge of the two confirmed winners does not beat amap alone. Council's
+  pre-logged caution stands: KnightCap terms are attack-table-derived, so the
+  kc-809 block is largely overlap + 809 dims of dilution at the 200g spend.
+- C1 cmap vs amap: **−147 (95% −251..−44) — LOSS, band excludes zero (under).**
+  Graded attacker counts LOSE to binary bits at equal dims. Declared confound:
+  /4 quantization shrinks single-attacker signal to 0.25 vs amap's 1.0 at the
+  same α — kill is (no-extra-info OR scale-attenuation); parks either way.
+- S1 amaps vs amap: **−28 (95% −123..+68), 100% decisive — TIE.** The
+  dilution-proof E6 scalars (24 dims) still add nothing detectable.
+
+All three park per pre-registration. Feature-add-on failures on top of amap now
+number SIX (amaph, dmap, amapd, kamap, cmap, amaps). :Feature-autoresearch:
+STOP condition fired → council. Council read: the common factor is the SCREEN,
+not the six features — H_data: 200 training games under-trains any encoder
+larger than the control; the screen resolves only amap-sized (~+60) effects.
+Wave 2 = instrument probe, pre-registered below.
+
+## :Arm7b-data-probe: (2026-07-16 — instrument experiment; never writes rl_trend)
+
+Question: does the 200-game screen spend HIDE feature wins? Single factor
+changed vs :Arm7-screen:: training games 200 → 600 (`qlearn.py 600 1`), all
+else identical (SEED=1, same seeds re-used from models/qlearn_<enc>_seed.pt,
+fresh arm7b checkpoints).
+- Lanes: `arm7b_amap` (fresh 600g control), `arm7b_kamap`, `arm7b_amaps`
+  (the two wave-1 ties; cmap excluded — its kill was signed, not a tie).
+- Duels (50g law): kamap600 vs amap600; amaps600 vs amap600.
+- Readout: if a tie band MOVES materially positive at 600g, H_data is
+  supported — every prior 200g park gains an asterisk and future screens move
+  to the 600g spend; if bands stay ~0, H_data is refuted for these features
+  and the parks are clean.
+- Also: round-robin among the wave-1 arms (kamap/cmap/amaps pairings, 50g
+  each) to complete the operator's tournament-standings artifact; pooled
+  150g/net records read as trends only.
