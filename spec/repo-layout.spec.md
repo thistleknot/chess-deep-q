@@ -56,6 +56,18 @@ chess-deep-q/
 - app.py: uvicorn target `chessdq.server:app`.
 - torch checkpoints: state_dict bundles only — no pickled class module paths.
 
+## Verdict (2026-07-15, executed)
+Battery ALL PASS: (1) import sweep 50/50 chessdq modules; (2) champion loaded,
+d2 move d2d4 legal (same as pre-move check); (3) server boot on :8123 — `/`,
+`/api/lanes`, `/api/trend` all 200, lane reap on boot; (4) `python lane.py ls`
+and `python head2head.py ...` shims forward correctly; (5) 4g d1 sharded
+self-duel end-to-end through the shim (mp-spawn workers imported
+`chessdq.head2head` in children; snapshot tags + interim bands intact);
+(6) compileall clean. Defect found & fixed during migration: bakeoff.py ran
+its Optuna study at module top-level (import-unsafe) — now `__main__`-guarded.
+Casualty: data/bake_kc-raw.log (untracked, 2026-07-12) overwritten by that
+firing before the guard; results survive in spec records.
+
 ## .gitignore additions
 `models/*.pt` except `models/champion*.pt` (experiment checkpoints stay local);
 `mlflow.db`, `mlruns/`.

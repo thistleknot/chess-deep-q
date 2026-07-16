@@ -268,3 +268,11 @@ dagger_pipe.log
 
 mlruns/
 reference/all-rl-algorithms/
+
+# :Package-restructure: (2026-07-15) — experiment checkpoints stay local;
+# only the champion lineage is tracked
+models/*.pt
+!models/champion*.pt
+mlruns/
+legacy/mlflow.db
+logs/*.log

@@ -31,4 +31,4 @@ def _open_browser():
 if __name__ == "__main__":
     print(f"chess Q-learning control panel -> http://{HOST}:{PORT}/  (Ctrl+C to stop)")
     threading.Thread(target=_open_browser, daemon=True).start()
-    uvicorn.run("server:app", host=HOST, port=PORT)
+    uvicorn.run("chessdq.server:app", host=HOST, port=PORT)

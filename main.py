@@ -27,7 +27,7 @@ random.seed(42)
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import main menu function
-from menu import main as menu_main
+from chessdq.menu import main as menu_main
 
 def setup_environment():
     """Setup the environment for the chess AI"""

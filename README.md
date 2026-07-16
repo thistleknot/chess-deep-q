@@ -16,8 +16,8 @@ Stockfish@1320** — the entire interval inside the 1428–1672 goal band, from 
 saw an external opponent or an engine label in training (15k self-play games). The recipe
 reproduced on a fresh restart: the prior campaign's peak matched in half the games.
 
-Canonical spec: [`spec/trivium.spec.md`](spec/trivium.spec.md) · lessons: [`LESSONS.md`](LESSONS.md)
-· rollback map: [`ROLLBACK.md`](ROLLBACK.md) · everything superseded:
+Canonical spec: [`spec/trivium.spec.md`](spec/trivium.spec.md) · lessons: [`LESSONS.md`](docs/LESSONS.md)
+· rollback map: [`ROLLBACK.md`](docs/ROLLBACK.md) · everything superseded:
 [`spec/dispositioned.md`](spec/dispositioned.md)
 
 ## 🎯 Quick Start
