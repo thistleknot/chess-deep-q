@@ -511,3 +511,18 @@ add-ons at this model class; next unlocks live elsewhere (nonlinear capacity at
 explicit operator go. Note: 600g absolute objective rose for every net
 (579→714-775 pooled proxy) — more data helps everyone, it just doesn't
 re-order these encodings.
+
+### :Deathmatch-evals: (2026-07-16, free-curiosity #4, zero code change)
+
+amap champion eval vs kc-1670 eval on the standard duel ruler (d2w8 lens, 50g
+sharded): **+0 (95% −95..+95), 100% decisive — DEAD TIE.** Yet the same two
+nets are 54 Elo apart at d9 on the ladder (floors 1724 vs 1670). Reading:
+amap's edge MATERIALIZES WITH DEPTH — invisible at the screen's own lens.
+Consequence, logged as **H_depth** (sharper than the refuted H_data): every
+screening park in this campaign is a park *at the d2 lens*; a feature whose
+value appears only under deep search would tie every screen we've run. The
+tpst caveat ("d2 duels subsume 1-ply threat knowledge") was the first sighting.
+Re-open condition for the whole parked family: a deeper duel lens — rs:<d>
+mover extended beyond kcz to enc:amap-family nets (native port exists; ~20-line
+head2head change) — an INSTRUMENT change, explicitly operator-gated per the
+h2h charter. The true d9 deathmatch runs the day that lands.
