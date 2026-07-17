@@ -11,6 +11,11 @@ from chessdq.difficulty import DifficultyController
 # Initialize colorama for cross-platform terminal colors
 colorama.init()
 
+# Dark-square base: 256-color charcoal, deliberately DISTINCT from the terminal's black
+# background — Back.BLACK made unhighlighted dark squares (e.g. the h8 corner) read as
+# holes in the board. Legacy consoles without VT support strip the code (harmless).
+BG_DARK_SQUARE = "\x1b[48;5;236m"
+
 class TerminalChessBoard:
     def __init__(self, board, ai, human_color=chess.WHITE):
         self.board = board
@@ -208,7 +213,7 @@ class TerminalChessBoard:
                 square_symbol = piece_symbols[piece.symbol()] if piece else piece_symbols['.']
                 
                 # Determine background color based on square type and highlights
-                bg_color = Back.LIGHTBLACK_EX if (file + rank) % 2 == 1 else Back.BLACK
+                bg_color = Back.LIGHTBLACK_EX if (file + rank) % 2 == 1 else BG_DARK_SQUARE
                 
                 # Priority-based highlighting (most important first)
                 if self.selected_square == square:
