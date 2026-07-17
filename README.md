@@ -79,9 +79,13 @@ Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdi
 
 ### Current Version
 
-| Version 1.5 — starting position (black rooks visible on their home squares) |
+| Version 1.5 — in the thick of it (knight selected, threat/guard/contested overlays live) |
 |--------------|
-| ![Chess v1.5](images/chess-v1.5-start.png) |
+| ![Chess v1.5 midgame](images/chess-v1.5-midgame.png) |
+
+| Starting position — black rooks now visible on their home squares (the old a8/h8 bug) |
+|--------------|
+| ![Chess v1.5 start](images/chess-v1.5-start.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
