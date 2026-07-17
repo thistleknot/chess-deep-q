@@ -5,7 +5,18 @@ State at rest: **champion = the operator's amap-897 feature net** (d9 scout
 Campaign law learned: representation beats algorithm — features 3-for-3
 confirmed, mechanisms 0-for-7. Resume by priority order below.
 
-## 1. kc ⊕ amap hybrid — the highest-prior untested cell
+## 1. kc ⊕ amap hybrid — SCREENED & PARKED (2026-07-16, :Arm7-screen:)
+VERDICT: kamap (937d) vs amap **−42 (−138..+54) TIE @200g; −78 (−175..+20)
+TIE @600g** — the merge of the two confirmed winners does not beat amap alone,
+and tripling the data didn't move the band (:Arm7b-data-probe: refuted the
+instrument-blindness explanation). Cause on record: KnightCap's terms are
+themselves attack-table-derived — the kc block is largely overlap + 809 dims
+of dilution. Same session also parked: cmap graded attacker counts (−147
+signed loss, /4-scale confound declared) and amaps E6 protected/threatened
+scalars (−28/+14 ties at both spends). Seven consecutive add-on failures on
+top of amap ⇒ **linear representation plateau declared** — remaining strength
+levers are the parked deep doors below, all explicit-operator-go. Original
+concept for the record:
 937 dims = kc-809 (KnightCap terms: king safety, pawn structure, mobility —
 the OLD champion's edge) ⊕ attack-maps-128 (the NEW champion's edge). Both
 blocks independently confirmed winners; both already computed inside the Rust
@@ -57,9 +68,11 @@ kc-1670 (models/champion_backup_kc1670.pt) vs amap champion, head-to-head d9,
 immune to anchor saturation. rs:<depth>: spec form in head2head.
 
 ## 5. E-queue canon features (screening tier only)
-E6 coverage-scalars first (operator's retreat concept compressed: ~24 floats,
-dilution-proof); then outposts/passed-pawn detail as explicit terms. Each: one
-50-game screen vs the current champion encoding, kill fast per the law.
+E6 coverage-scalars SCREENED & PARKED 2026-07-16 (amaps −28/+14 ties at
+200g/600g, :Arm7-screen:). Remaining queue (E1 pawn-structure planes, E3
+piece trio) carries LOW prior after the plateau finding — screen only with a
+changed lens (deeper duel depth or nonlinear head), not another 200g linear
+add-on run.
 
 ## 6. Played-buffer lane port (small defect, known)
 human_replay.py still asserts enc=="kc" — port to amap/no-ZCA so "Learn from my

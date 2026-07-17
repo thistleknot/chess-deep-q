@@ -65,3 +65,15 @@ never a plain re-run.
   (~90% bit overlap). Re-open variant only: dmap XOR amap (pushes+blocked bits).
 - E5 per-piece mobility COUNTS — the compressed form; superseded by the dmap
   screen result (the map version tied ⇒ counts stay parked).
+- kamap (kc-809 ⊕ amap, 937d) — TIE −42 (−138..+54), 2026-07-16. The
+  merge-of-winners cell (future_exploration #1): KnightCap terms are
+  attack-table-derived ⇒ mostly overlap + dilution. Re-open only at a higher
+  training spend if :Arm7b-data-probe: supports H_data.
+- cmap graded attacker counts (/4, same 128 dims as amap) — **LOSS −147
+  (−251..−44), signed kill**, 2026-07-16. Declared confound: /4 scale
+  attenuation vs amap's 1.0 bits; re-open variant only: unit-scaled counts.
+- amaps (amap ⊕ E6 protected/threatened scalars, 24d) — TIE −28 (−123..+68),
+  2026-07-16. The dilution-proof hpst retry still adds nothing; covered-count
+  term pre-dropped (linear-span argument).
+- dmap XOR amap re-basing — CLOSED WITHOUT A LANE, 2026-07-16: span-equivalent
+  to amap⊕dmap for a linear net; amapd already measured that space (+0).

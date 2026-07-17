@@ -1,6 +1,7 @@
 # Chess RL from scratch — the Trivium Recipe 🏰
-*A from-scratch RL agent that holds 1428–1672 Elo beyond doubt — trained on pure self-play
-with nothing deeper than a 2-ply glance*
+*A from-scratch RL agent whose champion holds a **1724 Elo floor** (49W-1D-0L over 50 games
+at depth 9 vs Stockfish@1320) — trained on pure self-play with nothing deeper than a
+2-ply glance*
 
 ## ⭐ The enshrined lesson
 
@@ -11,10 +12,15 @@ linear eval climb from scratch on pure self-play with **no deep search anywhere 
 keeps targets sound, the outcome term anchors early and anneals away. Depth is spent only at
 *play time*, where it converts the learned eval into strength.
 
-**Claims-grade result: 1484 Elo (95% CI 1434..1542), 98W-92D-10L over 200 games vs
-Stockfish@1320** — the entire interval inside the 1428–1672 goal band, from a net that never
-saw an external opponent or an engine label in training (15k self-play games). The recipe
-reproduced on a fresh restart: the prior campaign's peak matched in half the games.
+**Current champion (`models/champion.pt`): the amap-897 net — pst-769 planes ⊕ the
+operator's attack-coverage maps (128 learnable per-square any-attack bits), the campaign's
+first confirmed feature win (+51/+72 Elo across two independent seeds). At depth 9 it
+scored 49W-1D-0L over 50 games vs Stockfish@1320: Elo floor 1724** (the anchor saturates
+above ~1700, so the honest claim is a floor, not a point estimate). Prior claims-grade
+band on the 200-game protocol: **1670 (95% CI 1605..1762)** for the KnightCap-feature
+champion it replaced. Earlier milestone, pure self-play with no external opponent in
+training: 1484 (95% CI 1434..1542) over 200 games. Everything rides the same recipe —
+depth is spent only at *play time*.
 
 Canonical spec: [`spec/trivium.spec.md`](spec/trivium.spec.md) · lessons: [`LESSONS.md`](docs/LESSONS.md)
 · rollback map: [`ROLLBACK.md`](docs/ROLLBACK.md) · everything superseded:
@@ -39,8 +45,8 @@ checkmate rate. Training runs detached — it survives browser refreshes and ser
 
 ### Optuna study (hyperparameter tuning)
 ```bash
-python tune_qlearn.py [n_trials] [sample_games] [max_epochs] [elo_games] [batch_games]
-python tune_qlearn.py 5 200 3 20 20      # the standard protocol
+python experiments/tune_qlearn.py [n_trials] [sample_games] [max_epochs] [elo_games] [batch_games]
+python experiments/tune_qlearn.py 5 200 3 20 20      # the standard protocol
 ```
 Tunes the ALGORITHMIC knobs only — {γ decay, α step, λ trace, warmup ratio} via TPE seeded at
 literature priors. **Sample size and batch size are infrastructure controls: passed fixed, never
@@ -50,7 +56,7 @@ the study — TPE keeps learning from all prior trials — while any change star
 (old ones are kept; never delete the DB). One trainer at a time: don't run a study and a console run
 together (they share `data/qlearn_metrics.jsonl`).
 Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdict report with
-`python report_qlearn.py`.
+`python experiments/report_qlearn.py`.
 
 ### First Time Setup
 1. The AI will automatically create `models/` and `training_plots/` directories
@@ -62,7 +68,10 @@ Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdi
 ### Enhanced Terminal Chess Interface
 
 ## Release History
-- **1.4** 🆕 Improved model management, fixed training issues, non-interactive training plots
+- **1.5** 🆕 amap champion (Elo floor 1724 @d9); piece-contrast fix — black pieces on dark
+  squares now render gold (previously invisible, e.g. the black rooks at a8/h8); repo
+  restructured into the `chessdq/` package + `experiments/`
+- **1.4** Improved model management, fixed training issues, non-interactive training plots
 - **1.3** Bug fixes with Claude Opus 4
 - **1.2** Better color matching for terminal display
 - **1.1** AHA learning disabled by default
@@ -70,9 +79,9 @@ Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdi
 
 ### Current Version
 
-| Version 1.4 |
+| Version 1.5 — starting position (black rooks visible on their home squares) |
 |--------------|
-| ![Chess v1.4](images/chess-v1.3.png) |
+| ![Chess v1.5](images/chess-v1.5-start.png) |
 
 **Key Visual Features:**
 - 🟡 **Selected Piece** - Yellow highlighting
@@ -177,11 +186,16 @@ CNN Position Evaluation + Game Experience
 ### File Organization
 ```
 chess-deep-q/
-├── models/              # Saved model files (.pth)
+├── chessdq/             # The live package: all library modules + CLIs (server, qlearn, head2head, ...)
+├── experiments/         # Historical one-off arms/scripts (never imported by live code)
+├── app.py  main.py      # Entry points: training console (browser UI) and terminal menu
+├── qlearn.py head2head.py lane.py ...   # Thin root shims → python -m chessdq.<name>
+├── spec/                # Specs, pre-registrations, verdicts, dispositioned ledger
+├── docs/                # FINDINGS, LESSONS, ROLLBACK, glossary
+├── models/              # Saved model files (champion.pt = current best)
 ├── training_plots/      # Training visualization plots
 ├── saved_games/         # Saved games in PGN format
-├── logs/               # Application logs
-└── *.py                # Source code files
+└── logs/                # Application logs
 ```
 
 ### Search Algorithm

@@ -411,3 +411,118 @@ label updated; load+move verified. The +10 pooled finisher games merge into the
 trend row asynchronously (can only confirm at this score). GOAL CLOSED: the
 champion is built on the operator's features. Follow-up defect: human_replay.py
 asserts enc=="kc" — port the played-buffer lane before next use.
+
+## :Arm7-screen: (2026-07-16 — operator: "8 hours... think triz + six hats, design experiments, tournament style")
+
+Meta-read driving the design: representation beats algorithm (features 1-for-4
+confirmed — amap; mechanisms 0-for-7), and every ADD-ON tested on top of amap
+so far has tied at the 50g resolution (amaph leaning, amapd dead, dmap under).
+So: three FEATURE arms, chosen by TRIZ move, all screened against the standing
+arm6_amap control (same protocol, same seed — reused, not retrained):
+
+| Arm | Dims | TRIZ move | Question |
+|---|---|---|---|
+| `arm7_kamap` (kc-809 ⊕ amap-128) | 937 | merging | K1: do the KnightCap hand terms (king safety, pawn structure — the OLD champion's edge) add on top of coverage? Highest prior: both blocks independently confirmed; lowest expected bit-overlap of any candidate. future_exploration #1. |
+| `arm7_cmap` (pst-769 ⊕ count-maps-128) | 897 | local quality | C1: do graded attacker COUNTS beat binary coverage at EQUAL dims (info-per-dim, ledger idea #6)? count = popcount(attackers)/4, declared. |
+| `arm7_amaps` (amap-897 ⊕ E6-scalars-24) | 921 | segmentation/compression | S1: does the compressed protected/threatened signal add on top of coverage? E6 per :Retreat: — per-side × per-piece-type PROTECTED and THREATENED counts (/8, 24 floats). The dilution-proof retry of the leaning hpst arm. Covered-square COUNT deliberately DROPPED: it is a linear sum of amap bits — inside a linear net's span by construction, adds nothing. |
+
+Door NOT taken, with the argument logged: dmap-XOR-amap re-basing is span-
+equivalent to amap⊕dmap for a linear model — amapd (+0 dead tie) already
+measured that function space; do-not-retry holds without a new instrument.
+
+Pre-registration (exact arm5/arm6 protocol, SEED=1 matched):
+- Control: `models/arm6_amap_best.pt` (trained 2026-07-15 at this exact
+  protocol) — no retrain; duels are seed- and protocol-matched.
+- Seeds: torch.manual_seed(20), fresh ValueNet('linear', 64, nin), bundle
+  {state_dict, arch, enc, zca:False, cum_games:0} → models/arm7_<name>.pt.
+- Train: `qlearn.py 200 1` via lane.py; KC_FAITHFUL=1 OPP=graded ELO_GAMES=0
+  EPOCH_ELO_GAMES=12 CONFIRM=1 PATIENCE=99 SEED=1 RSEARCH_DEPTH=0
+  (python-beam targets); one lane = one launcher process (lane-14 lesson);
+  cores 0-2 / 3-5 / 6-8 (thermal law, 9/12).
+- Duels (50g law, sharded H2H_SHARDS=6, sequential on cores 0-5):
+  K1 kamap vs arm6_amap; C1 cmap vs arm6_amap; S1 amaps vs arm6_amap.
+- Verdict rule (unchanged): band excludes zero → SEED=2 confirm pair fires
+  before anything else; band spans zero → park, ledger, do-not-retry.
+- Gate battery per encoder (≥3 varied FENs) before any training: kamap
+  prefix==kc/suffix==amap; cmap bit-consistency with amap (count>0 ⇔ bit)
+  + hand-counted startpos values + black mirror; amaps prefix==amap +
+  hand-counted startpos scalars (8/8 pawns protected → 1.0, rooks 0,
+  threatened all 0) + mirror.
+
+### :Arm7-screen: VERDICT (2026-07-16, all 50g sharded, input SHAs on verdict lines)
+
+- K1 kamap vs amap: **−42 (95% −138..+54), 100% decisive — TIE, leaning under.**
+  The merge of the two confirmed winners does not beat amap alone. Council's
+  pre-logged caution stands: KnightCap terms are attack-table-derived, so the
+  kc-809 block is largely overlap + 809 dims of dilution at the 200g spend.
+- C1 cmap vs amap: **−147 (95% −251..−44) — LOSS, band excludes zero (under).**
+  Graded attacker counts LOSE to binary bits at equal dims. Declared confound:
+  /4 quantization shrinks single-attacker signal to 0.25 vs amap's 1.0 at the
+  same α — kill is (no-extra-info OR scale-attenuation); parks either way.
+- S1 amaps vs amap: **−28 (95% −123..+68), 100% decisive — TIE.** The
+  dilution-proof E6 scalars (24 dims) still add nothing detectable.
+
+All three park per pre-registration. Feature-add-on failures on top of amap now
+number SIX (amaph, dmap, amapd, kamap, cmap, amaps). :Feature-autoresearch:
+STOP condition fired → council. Council read: the common factor is the SCREEN,
+not the six features — H_data: 200 training games under-trains any encoder
+larger than the control; the screen resolves only amap-sized (~+60) effects.
+Wave 2 = instrument probe, pre-registered below.
+
+## :Arm7b-data-probe: (2026-07-16 — instrument experiment; never writes rl_trend)
+
+Question: does the 200-game screen spend HIDE feature wins? Single factor
+changed vs :Arm7-screen:: training games 200 → 600 (`qlearn.py 600 1`), all
+else identical (SEED=1, same seeds re-used from models/qlearn_<enc>_seed.pt,
+fresh arm7b checkpoints).
+- Lanes: `arm7b_amap` (fresh 600g control), `arm7b_kamap`, `arm7b_amaps`
+  (the two wave-1 ties; cmap excluded — its kill was signed, not a tie).
+- Duels (50g law): kamap600 vs amap600; amaps600 vs amap600.
+- Readout: if a tie band MOVES materially positive at 600g, H_data is
+  supported — every prior 200g park gains an asterisk and future screens move
+  to the 600g spend; if bands stay ~0, H_data is refuted for these features
+  and the parks are clean.
+- Also: round-robin among the wave-1 arms (kamap/cmap/amaps pairings, 50g
+  each) to complete the operator's tournament-standings artifact; pooled
+  150g/net records read as trends only.
+
+### :Arm7-screen: round-robin standings (2026-07-16, 50g/pairing, trends only)
+
+| # | Net | Pooled /3 matches | Notes |
+|---|---|---|---|
+| 1 | amap (control) | 1.80 | holds the bracket |
+| 2 | kamap | 1.69 | beat cmap +108 (+8..+207), amaps +70 (−27..+167) |
+| 3 | amaps | 1.48 | beat cmap +85-lean |
+| 4 | cmap | 1.03 | lost all three pairings — signed loser |
+
+Fully transitive ordering; bracket agrees with the control-duels. arm7b
+600g-probe lanes (26/27/28) launched on the same seeds.
+
+### :Arm7b-data-probe: VERDICT (2026-07-16)
+
+- kamap600 vs amap600: **−78 (95% −175..+20) — TIE, leaning under** (was −42 @200g).
+- amaps600 vs amap600: **+14 (95% −81..+109) — TIE** (was −28 @200g).
+**H_data REFUTED for these features**: tripling the training spend moved neither
+band materially; the 200g screen was not hiding wins here. The arm7 parks are
+clean. Standing conclusion strengthens: amap already spans the linear-net
+coverage signal — the campaign is at a REPRESENTATION PLATEAU for pst-adjacent
+add-ons at this model class; next unlocks live elsewhere (nonlinear capacity at
+10× corpus, stronger anchors, or depth) — all already parked doors requiring
+explicit operator go. Note: 600g absolute objective rose for every net
+(579→714-775 pooled proxy) — more data helps everyone, it just doesn't
+re-order these encodings.
+
+### :Deathmatch-evals: (2026-07-16, free-curiosity #4, zero code change)
+
+amap champion eval vs kc-1670 eval on the standard duel ruler (d2w8 lens, 50g
+sharded): **+0 (95% −95..+95), 100% decisive — DEAD TIE.** Yet the same two
+nets are 54 Elo apart at d9 on the ladder (floors 1724 vs 1670). Reading:
+amap's edge MATERIALIZES WITH DEPTH — invisible at the screen's own lens.
+Consequence, logged as **H_depth** (sharper than the refuted H_data): every
+screening park in this campaign is a park *at the d2 lens*; a feature whose
+value appears only under deep search would tie every screen we've run. The
+tpst caveat ("d2 duels subsume 1-ply threat knowledge") was the first sighting.
+Re-open condition for the whole parked family: a deeper duel lens — rs:<d>
+mover extended beyond kcz to enc:amap-family nets (native port exists; ~20-line
+head2head change) — an INSTRUMENT change, explicitly operator-gated per the
+h2h charter. The true d9 deathmatch runs the day that lands.
