@@ -174,11 +174,16 @@ def played_buffer_mode():
     if (input(f"Fine-tune champion copy on {n} game(s)? (y/n, default y): ").strip().lower() or "y") != "y":
         return
     subprocess.run([_sys.executable, "human_replay.py"], cwd=".")
-    print("Candidate: models/champion_hb.pt — verdict duel (600g vs champion):")
-    print("  python head2head.py kcz:models/champion_hb.pt kcz:models/champion.pt 600 hb_verdict")
+    # :Games-cap: (operator law) — explore 20, full run 50; head2head's own H2H_CAP
+    # default would clamp a larger number anyway, but the PRINTED command must not
+    # lie about what actually runs. Mover spec matches the champion's live encoder
+    # (enc:amap:, NOT kcz: — that's the retired kc-809 lineage; a dimension
+    # mismatch, not just a stale label).
+    print("Candidate: models/champion_hb.pt — verdict duel (50g vs champion):")
+    print("  python head2head.py enc:amap:models/champion_hb.pt enc:amap:models/champion.pt 50 hb_verdict")
     if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) == "y":
-        subprocess.run([_sys.executable, "head2head.py", "kcz:models/champion_hb.pt",
-                        "kcz:models/champion.pt", "600", "hb_verdict"], cwd=".")
+        subprocess.run([_sys.executable, "head2head.py", "enc:amap:models/champion_hb.pt",
+                        "enc:amap:models/champion.pt", "50", "hb_verdict"], cwd=".")
 
 
 def top_menu():
