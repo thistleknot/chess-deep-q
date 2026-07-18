@@ -1,7 +1,8 @@
 # Chess RL from scratch — the Trivium Recipe 🏰
-*A from-scratch RL agent whose champion holds a **1724 Elo floor** (49W-1D-0L over 50 games
-at depth 9 vs Stockfish@1320) — trained on pure self-play with nothing deeper than a
-2-ply glance*
+*A from-scratch RL agent whose champion measures **1878 Elo (95% 1756..2000)** — multi-anchor
+MLE over 50 games at depth 9 vs Stockfish@1500–2300 (the earlier 1724 figure was the Wilson
+floor of a saturated single-anchor scout; consistent, now superseded) — trained on pure
+self-play with nothing deeper than a 2-ply glance*
 
 ## ⭐ The enshrined lesson
 

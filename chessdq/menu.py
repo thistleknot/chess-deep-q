@@ -12,9 +12,9 @@ _PLAY_PLAYOUTS = 160          # :Difficulty-mode: strength dial → :Play-mode: 
 
 def _pick_agent():
     """:Selectable-agent: — CHAMPION default (self-play RL net + native alpha-beta d9,
-    claims 1670); the earlier deliverables stay selectable."""
-    print("\nAgent:  1. CHAMPION — the 1737-scout/1670-claims net, d9 (default; ONE model, "
-          "two sample sizes)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
+    1878 MLE 1756..2000); the earlier deliverables stay selectable."""
+    print("\nAgent:  1. CHAMPION — amap-897 net, 1878 Elo (95% 1756..2000, multi-anchor "
+          "MLE), d9 (default)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
     c = input("Choose (1-5, default 1): ").strip() or "1"
     return {"1": "champion", "2": "puct", "3": "engine", "4": "beam", "5": "nnue"}.get(c, "champion")
 
@@ -120,15 +120,15 @@ def difficulty_mode():
     print("\nChampion difficulty:")
     print("  1. dynamic (default) — tracks YOUR play, targets ~1 sdev above your level")
     print("  2. fixed Elo        — pick a strength and it stays there")
-    print("  3. full strength    — the 1670-claims engine (d9 argmax)")
+    print("  3. full strength    — the 1878-MLE engine (d9 argmax)")
     c = input("Choose (1-3, default 1): ").strip() or "1"
     if c == "2":
         cal = _load_calibrator()
-        tiers = [800, 1000, 1183, 1400, 1572, 1670]
+        tiers = [800, 1000, 1183, 1400, 1572, 1878]
         print("  fixed tiers: " + "  ".join(f"{i+1}.~{e}" for i, e in enumerate(tiers)))
         k = input("Tier (1-6, default 3): ").strip() or "3"
         target = tiers[max(0, min(5, int(k) - 1))] if k.isdigit() else 1183
-        if target >= 1670:
+        if target >= 1878:
             _DIFFICULTY = {"choice": "full", "tau": None, "depth": 9}
         elif target >= 1572:
             _DIFFICULTY = {"choice": "full", "tau": None, "depth": 7}

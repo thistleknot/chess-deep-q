@@ -112,7 +112,8 @@ def _puct_value_fn(net, dev):
 def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
     """Return (label, move_fn, value_fn). move_fn(board) -> a legal move (or None); value_fn may be
     None. The default agent is the CHAMPION — the self-play RL net inside native alpha-beta d9,
-    claims-measured 1670 (95% 1605..1762) vs SF@1320 (spec/bullet-route.spec.md ladder)."""
+    measured 1878 (95% 1756..2000) by the multi-anchor MLE ladder vs SF@1500-2300
+    (experiments/anchor_ladder.py, 2026-07-18; supersedes the saturated 1320-anchor scout)."""
     import torch
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if name == "champion":
@@ -125,7 +126,7 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
         w, b = raw_weights(path)                     # kc: ZCA identity-gated; amap: raw 897
         srch = importlib.import_module("rsearch4").Searcher(w, b)
         champ = ChampionAgent(srch, depth=depth)
-        return (f"champion(d{depth}, amap-897 operator features, floor-1724@50g)", champ, champ.value)
+        return (f"champion(d{depth}, amap-897 operator features, 1878-mle 1756..2000)", champ, champ.value)
     if name == "puct":
         path = "models/tower_puct.pt"
         if not os.path.exists(path):

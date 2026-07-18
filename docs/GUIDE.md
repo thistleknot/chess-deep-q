@@ -63,7 +63,8 @@ Objective = final SF@1320-anchored Elo (`KILL-CHECK elo` line); render the verdi
 3. Training plots are saved to `training_plots/` (no interactive plots during training)
 
 ## Release History
-- **1.5** amap champion (Elo floor 1724 @d9); piece-contrast fix — black pieces on dark
+- **1.5** amap champion (Elo floor 1724 @d9; re-measured 1878, 95% 1756..2000, by the
+  multi-anchor MLE ladder 2026-07-18 — the scout's 1320 anchor was saturated); piece-contrast fix — black pieces on dark
   squares render gold (previously invisible, e.g. the black rooks at a8/h8); dark squares
   render charcoal, distinct from the terminal background (previously `Back.BLACK` made
   unhighlighted dark squares read as holes, e.g. the h8 corner); repo restructured into
