@@ -107,7 +107,7 @@ def main():
         y = torch.tensor([p[1] for p in pairs], dtype=torch.float32)
         pred = net(X)
         loss = torch.mean((pred - y) ** 2)
-        surprise += float(loss) * len(pairs)
+        surprise += loss.item() * len(pairs)
         opt.zero_grad(); loss.backward(); opt.step()
         last_loss = float(torch.mean((net(X) - y) ** 2))
         total += len(pairs)
