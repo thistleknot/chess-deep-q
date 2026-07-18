@@ -141,6 +141,11 @@ else:
         REGIME += "|crelu|v1"                            # clipped-ReLU hidden activation
     if os.environ.get("QLEARN_TUNE_SEED"):
         REGIME += "|seed-" + os.environ["QLEARN_TUNE_SEED"].split("/")[-1].replace(".pt", "")
+    if float(os.environ.get("QLEARN_MCTS_LAMBDA", "0")) > 0:
+        # spec :Lambda-target-training: — λ-tree TDLeaf targets; token carries λ and
+        # sims so arm studies can never resume a beam-target control study
+        REGIME += (f"|mcts-lb{float(os.environ['QLEARN_MCTS_LAMBDA']):g}"
+                   f"-s{os.environ.get('QLEARN_MCTS_SIMS', '16')}|v1")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
 BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # (q) behavior policy — study identity
 CURRICULUM = os.environ.get("QLEARN_CURRICULUM", "0")          # exploring-starts fraction (passthrough
@@ -215,7 +220,7 @@ def run_trial(p, trial_no):
                       "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK", "QLEARN_DDQN",
                       "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY",
                       "QLEARN_LR_WARMUP", "QLEARN_PHASE_MIX", "QLEARN_DIS_GAMMA",
-                      "QLEARN_CRELU"):
+                      "QLEARN_CRELU", "QLEARN_MCTS_LAMBDA", "QLEARN_MCTS_SIMS"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:

@@ -89,6 +89,9 @@ BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # softmax = 1-ply
 # λ-return TARGETS stay 1-ply greedy (unchanged semantics).
 SEARCH_W   = int(os.environ.get("QLEARN_SEARCH_WIDTH", "8"))   # top-K root moves get reply expansion
 SEARCH_D   = int(os.environ.get("QLEARN_SEARCH_DEPTH", "2"))   # search depth for behavior/measure (2|3)
+MCTS_LB    = float(os.environ.get("QLEARN_MCTS_LAMBDA", "0"))  # spec :Lambda-target-training: — >0 swaps
+MCTS_SIMS  = int(os.environ.get("QLEARN_MCTS_SIMS", "16"))     # TDLeaf target/behavior source for the
+#                                                                λ-tree engine (puct_value.puct_choose)
 ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 planes | kc = Merge 6
 # KnightCap-donor features (809) | nk = :Features-5k: -> :Kanerva: (kanerva_enc.py, 512-dim
 # overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
@@ -320,6 +323,14 @@ class QAgent:
             leaf_enc = ENC_FN(chess.Board(leaf_fen))
             pred = chess.Move.from_uci(pred_u) if pred_u else None
             return chess.Move.from_uci(mv_u), leaf_enc, float(val), pred
+        if TDLEAF and MCTS_LB > 0.0:
+            # :Lambda-target-training: — λ-tree targets/behavior; measurement
+            # (greedy_move) stays on the d2 beam so both arms share one ruler
+            from chessdq.puct_value import puct_choose
+            mv, leaf_board, gv, pred = puct_choose(
+                board, self.value_fn, ENC_FN, MCTS_SIMS, rng,
+                tau=max(tau, 1e-6), lambda_backup=MCTS_LB)
+            return mv, ENC_FN(leaf_board), gv, pred
         if TDLEAF:
             return search_move(board, self.value_fn, max(tau, 1e-6), rng, SEARCH_W,
                                depth=SEARCH_D, return_leaf=True, encode_fn=ENC_FN,

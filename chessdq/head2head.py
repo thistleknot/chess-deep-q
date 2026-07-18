@@ -117,6 +117,47 @@ def mover_from_spec(spec, rng):
         sims = int(sims_s)
         vf, enc = evaluator_from_spec(inner)
         return lambda board: puct_move(board, vf, enc, sims, rng)
+    if spec.startswith("sa:"):
+        # search-arm mover (spec/search-arms.spec.md :SA-mover:):
+        # 'sa:<k=v,...>:<ckpt.pt>' — value-PUCT engine with the search-arm dials over
+        # the ckpt's OWN encoder (raw_weights space; NOT kcz: — its kc-809 encoder
+        # mismatches the amap-897 champion). Params: sel=puct|ucbv, lb=<float>,
+        # leaf=vf|ab<d>, sims=<int>, c=<c_puct>, tp=<t_prior>, ucbc=<ucb_c>.
+        from chessdq.puct_value import puct_move
+        from chessdq.corpus_gen import raw_weights
+        from chessdq.encoders import get as enc_get
+        _, params_s, ckpt = spec.split(":", 2)
+        p = dict(kv.split("=", 1) for kv in params_s.split(",") if kv)
+        ck = torch.load(ckpt, map_location="cpu")
+        enc_fn, nin = enc_get(ck.get("enc", "pst"))
+        w, b = raw_weights(ckpt)
+        w = np.asarray(w, dtype=np.float64)
+        assert w.size == nin, f"sa: weight/encoder mismatch {w.size} vs {nin}"
+
+        def vf(X, _w=w, _b=b):
+            return np.tanh(X @ _w + _b)
+
+        leaf = p.get("leaf", "vf")
+        leaf_fn = None
+        if leaf.startswith("ab"):
+            import importlib
+            d = int(leaf[2:])
+            srch = importlib.import_module("rsearch4").Searcher(list(w), b)
+            leaf_fn = lambda board, _s=srch, _d=d: math.tanh(float(_s.search(board.fen(), _d)[1]))
+        sims = int(p.get("sims", "400"))
+        kw = dict(c_puct=float(p.get("c", "1.5")), t_prior=float(p.get("tp", "0.2")),
+                  lambda_backup=float(p.get("lb", "0.0")), selection=p.get("sel", "puct"),
+                  leaf_fn=leaf_fn, ucb_c=float(p.get("ucbc", "1.0")))
+        return lambda board: puct_move(board, vf, enc_fn, sims, rng, **kw)
+    if spec.startswith("beam:"):
+        # parameterized default policy (spec/search-arms.spec.md :Beam-mover-spec:):
+        # 'beam:<tau>:<width>:<depth>:<inner>' — the incumbent beam mover with its
+        # own knobs exposed (baseline Optuna arm); beam:0.02:8:2:<inner> = default.
+        _, tau_s, width_s, depth_s, inner = spec.split(":", 4)
+        vf, enc = evaluator_from_spec(inner)
+        tau_b, width_b, depth_b = float(tau_s), int(width_s), int(depth_s)
+        return lambda board: search_move(board, vf, tau_b, rng, width_b,
+                                         depth=depth_b, encode_fn=enc)
     if spec.startswith("rs:"):
         # native alpha-beta at depth D over a kc-809 linear ckpt — the incumbent's
         # own vehicle (deterministic; a losing side steering into repetition is
