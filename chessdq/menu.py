@@ -164,6 +164,7 @@ def played_buffer_mode():
     self-generated: own d2 search values + outcome, proven trivium blend). Promotion is
     duel-gated, never automatic."""
     import glob as _glob
+    import re as _re
     import subprocess
     import sys as _sys
     n = len(_glob.glob("data/human_games/*.pgn"))
@@ -181,9 +182,27 @@ def played_buffer_mode():
     # mismatch, not just a stale label).
     print("Candidate: models/champion_hb.pt — verdict duel (50g vs champion):")
     print("  python head2head.py enc:amap:models/champion_hb.pt enc:amap:models/champion.pt 50 hb_verdict")
-    if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) == "y":
-        subprocess.run([_sys.executable, "head2head.py", "enc:amap:models/champion_hb.pt",
-                        "enc:amap:models/champion.pt", "50", "hb_verdict"], cwd=".")
+    if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) != "y":
+        return
+    result = subprocess.run(
+        [_sys.executable, "head2head.py", "enc:amap:models/champion_hb.pt",
+         "enc:amap:models/champion.pt", "50", "hb_verdict"],
+        cwd=".", capture_output=True, text=True)
+    print(result.stdout)
+    m = _re.search(r"-> Elo [+-]?\d+ \(95% ([+-]?\d+)\.\.([+-]?\d+)\)", result.stdout or "")
+    if not m or float(m.group(1)) <= 0:
+        print("No promotion — band does not exclude zero (or duel failed to report).")
+        return
+    print(f"Candidate clears the champion, band excludes zero ({m.group(1)}..{m.group(2)}).")
+    if (input("Promote to models/champion.pt? backs up the current champion "
+              "first (y/n, default n): ").strip().lower()) != "y":
+        return
+    import shutil as _shutil
+    import time as _time
+    backup = f"models/champion_backup_{_time.strftime('%Y%m%dT%H%M%S')}.pt"
+    _shutil.copy2("models/champion.pt", backup)          # :Backup-before-promote: —
+    _shutil.copy2("models/champion_hb.pt", "models/champion.pt")   # never skip this step
+    print(f"Promoted. Prior champion preserved at {backup}.")
 
 
 def top_menu():
