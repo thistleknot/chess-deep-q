@@ -24,6 +24,20 @@ python main.py     # play the champion in the terminal
 python app.py      # training console (browser UI at http://127.0.0.1:8000/)
 ```
 
+### Building the native search extension (rsearch4)
+
+The CHAMPION agent (default in `main.py` → Play) runs its alpha-beta search in a compiled
+Rust extension (`rsearch/`, module name `rsearch4`) — it is **not** installed by
+`pip install -r requirements.txt`. Build it once, from the repo root:
+```bash
+pip install maturin
+cd rsearch
+maturin develop --release
+```
+Requires a Rust toolchain (`rustup`, https://rustup.rs). Without this step, Play mode's
+CHAMPION option fails with `ModuleNotFoundError: rsearch4`; the other agents (net+PUCT,
+alpha-beta engine, beam, nnue) don't need it.
+
 ## 🖼️ In the thick of it
 
 | Queen selected — coverage map live (threatened red, guarded cyan, contested cream) |

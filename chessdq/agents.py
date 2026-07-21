@@ -124,7 +124,16 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
         import importlib
         from chessdq.corpus_gen import raw_weights
         w, b = raw_weights(path)                     # kc: ZCA identity-gated; amap: raw 897
-        srch = importlib.import_module("rsearch4").Searcher(w, b)
+        try:
+            rsearch4 = importlib.import_module("rsearch4")
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "rsearch4 (native search extension) is not built. From the repo root, run:\n"
+                "    pip install maturin\n"
+                "    cd rsearch && maturin develop --release\n"
+                "See README.md 'Building the native search extension' for details."
+            ) from e
+        srch = rsearch4.Searcher(w, b)
         champ = ChampionAgent(srch, depth=depth)
         return (f"champion(d{depth}, amap-897 operator features, 1878-mle 1756..2000)", champ, champ.value)
     if name == "puct":
