@@ -179,3 +179,26 @@ ORTHOGONAL cross-model, exactly as the per-model-dynamics verdict predicts. The
 earlier negative rho was an artifact of the era-proxy and cross-instrument x's.
 Per-model transfer lifts (the real payload): amap +1014, kc1670 +705, zca +560,
 triv +462, vol +414, hyb +376. data/optuna_vs_full_final.png/.json.
+
+SEARCH-DISTILL Phase A (:Distill-control:, 2026-07-21): CONFIRMED screen-grade.
+One step of purity-compliant expert iteration — refit the amap-897 linear eval to its OWN
+d5 native-minimax labels — beats the 1878 champion on TWO controlled instruments: head2head
+d2-beam +798 (1.000/50g, champ-vs-champ ctl 0.517) AND fair native deterministic diverse-
+opening duel d6 +176 (0.733, band excl 0.5; d4 +35 ns) — advantage grows with depth. Falsifies
+the pre-registered linear-fixed-point risk. Two instrument traps recorded (spec/search-distill
+.spec.md): (1) :Saturation-cut: raw ridge on ±1 labels blows eval scale 16x → native-unplayable,
+fix = drop |y|>0.90 + ridge~100; (2) :No-native-duel-ruler: play_games handicaps the exploring
+side only (champ-vs-itself=0.000), NOT a fair duel ruler. Artifacts: models/champion_distillA2.pt,
+experiments/distill_linear.py, data/h2h_verdict_distillA.md. Next gate = native d9 anchor ladder
+(operator-launched). Phase B (NNUE, same labels) gated; corrected-linear residual (atanh-RMS 0.11)
+caps expected nonlinear headroom.
+
+SEARCH-DISTILL FINAL (2026-07-22): CONFIRMED WIN — search-distillation expert iteration beats the
+1878 TDLeaf champion by ~+240 Elo, native-d9 head-to-head (A2 +232, A3 +221, A4 +267; all bands
+exclude 0.5; instrument control champ-vs-champ 0.490). Champion candidate = models/champion_distillA2.pt
+(single distillation step captures the gain; iteration converges; SWA-average dilutes). Recipe +
+promotion command in spec/search-distill.spec.md; full campaign data/search_distill_campaign.md.
+KEY INSTRUMENT LESSON: the vs-SF anchor ladder DRAW-FLOODS strong agents (120-ply cap, no adjudication
+-> 0.5 at upper anchors) and understated this to a false 20g "tie" (A2 1917 vs champ 1878 = +39 ladder,
+but +232 head-to-head). For agents near/above the top anchor, the direct native head-to-head is the
+true ruler, NOT the ladder — and NOT head2head (a d2-beam lens) NOR play_games (handicaps the explorer).

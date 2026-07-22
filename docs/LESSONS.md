@@ -126,3 +126,48 @@ Theory first (S&B named every bug before we hit it), then stand on the strongest
 you can actually run (code + weights + training script), measure one change at a time against
 confirmed numbers, and put the hot loop in native code the moment wall-clock becomes the
 binding constraint.
+
+## Search-distillation campaign (2026-07-22) — the eval learns what the search knows
+
+Outcome: expert-iteration self-distillation (label the champion's own self-play PV-leaf FENs with the
+SAME net's d5 native minimax, drop |label|>0.90, ridge-100 atanh linear fit) produced an eval **+232
+Elo stronger than the 1878 TDLeaf champion, native-d9 head-to-head** (robust: A2 +232, A3 +221, A4
++267, all bands exclude 0.5; control champ-vs-champ 0.490). Promoted distillA2. See
+`spec/search-distill.spec.md`, `data/search_distill_campaign.md`.
+
+10. **The teacher is eval + search, not the eval — so imitation COMPOUNDS instead of converging to
+    the eval.** Distilling the net's own d5-minimax backed values into its static eval makes the
+    static eval ~one lookahead stronger; deployed at d9 that converts to strength. This is the
+    bitter-lesson mechanism in miniature: search generates a signal stronger than the current eval,
+    the eval learns it. The FIRST step captures most of it (A2≈A3≈A4); iteration converges fast and
+    weight-averaging the iterates (SWA) DILUTES rather than robustifies.
+
+11. **Your ruler can be 1200 Elo wrong — validate every instrument with a self-control before you
+    trust a verdict.** Five instruments lied here, each nearly flipping a verdict:
+    - The vs-SF **anchor ladder DRAW-FLOODS strong agents** (120-ply cap, no adjudication → 0.5 at
+      upper anchors), compressing ratings together: it reported distillA2 1917 vs champ 1878 (+39,
+      "tie") while the direct head-to-head was **+232**. For agents near/above the top anchor, the
+      direct native deterministic-diverse-opening duel is the true ruler — NOT the ladder.
+    - `anchor_ladder` **bare ckpt = native d9** (correct); an `enc:amap:<ckpt>` spec routes to a
+      **d2-beam mover** → a ~1200-Elo phantom (distillA2 showed 700 vs SF at the beam mover, 1917 at
+      native d9). Measure deployment strength with the bare ckpt.
+    - **head2head is a d2-beam lens** (the canonical repo ruler for ALL prior verdicts) — it does not
+      track native-d9 deployment (distillA2 scored +798 d2-beam yet only tied on the draw-flooded
+      ladder). Every head2head-screened verdict inherits this caveat.
+    - `rsearch4.play_games` applies exploration (eps/tau) to the **agent side only** → champ-vs-itself
+      scored 0.000. It is a training-data GENERATOR, not a fair duel ruler.
+    - The control that saves you: **A-vs-A must score ~0.5**. Champ-vs-champ = 0.490 (band incl 0.5)
+      validated the head-to-head; without it the +232 would be unfalsifiable.
+
+12. **Bad labels beat the fit before the fit begins.** Raw ridge on self-play labels that saturate at
+    ±1 (won/lost tactical leaves) blows the fitted eval scale 16× (‖w‖ 10.3 vs champion 0.65,
+    corr +0.06) → native-unplayable. Dropping |label|>0.90 fixed it (‖w‖ 0.78, corr +0.39). The
+    saturated targets carry no positional gradient; they only wreck the scale the native searcher's
+    aspiration windows depend on.
+
+13. **On Windows, spawn-multiprocessing re-imports your module in every worker — keep hot-loop
+    workers dependency-light.** Pool workers re-importing a module that `import torch`s loaded CUDA
+    DLLs per worker and exhausted the paging file (WinError 1455). The fix was a torch-free worker
+    module (`experiments/_duelcore.py`, imports only rsearch4/chess/random). Also: `python - <<EOF`
+    heredocs make `__main__` = `<stdin>`, which spawn cannot re-import — run multiprocessing from real
+    `.py` files with an `if __name__ == "__main__"` guard.
