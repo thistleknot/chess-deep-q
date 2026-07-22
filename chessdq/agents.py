@@ -135,7 +135,7 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
             ) from e
         srch = rsearch4.Searcher(w, b)
         champ = ChampionAgent(srch, depth=depth)
-        return (f"champion(d{depth}, amap-897 operator features, 1878-mle 1756..2000)", champ, champ.value)
+        return (f"champion(d{depth}, amap-897 search-distilled, +232 Elo H2H over the 1878 net)", champ, champ.value)
     if name == "puct":
         path = "models/tower_puct.pt"
         if not os.path.exists(path):

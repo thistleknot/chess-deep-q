@@ -13,8 +13,8 @@ _PLAY_PLAYOUTS = 160          # :Difficulty-mode: strength dial → :Play-mode: 
 def _pick_agent():
     """:Selectable-agent: — CHAMPION default (self-play RL net + native alpha-beta d9,
     1878 MLE 1756..2000); the earlier deliverables stay selectable."""
-    print("\nAgent:  1. CHAMPION — amap-897 net, 1878 Elo (95% 1756..2000, multi-anchor "
-          "MLE), d9 (default)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
+    print("\nAgent:  1. CHAMPION — amap-897 search-distilled net (+232 Elo H2H over the prior "
+          "1878 net), d9 (default)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
     c = input("Choose (1-5, default 1): ").strip() or "1"
     return {"1": "champion", "2": "puct", "3": "engine", "4": "beam", "5": "nnue"}.get(c, "champion")
 
