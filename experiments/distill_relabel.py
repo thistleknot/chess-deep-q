@@ -29,7 +29,11 @@ def main():
 
     z = np.load(CACHE, allow_pickle=True)
     fens = [str(f) for f in z["fens"]]
-    print(f"relabeling {len(fens)} cached positions at d{ld} (teacher={SRC})...", flush=True)
+    subset = int(os.environ.get("DISTILL_SUBSET", "0"))     # bound the pass for expensive deep labels
+    if subset and subset < len(fens):
+        idx = np.random.RandomState(0).choice(len(fens), subset, replace=False)  # representative, deterministic
+        fens = [fens[i] for i in sorted(idx)]
+    print(f"relabeling {len(fens)} cached positions at d{ld} (teacher={SRC}, threads={threads})...", flush=True)
     w, b = raw_weights(SRC)
     y = label(fens, w, b, ld, threads)
     X = featurize(fens)

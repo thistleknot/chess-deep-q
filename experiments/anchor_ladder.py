@@ -91,6 +91,22 @@ def _one_game(args):
         plies += 1
     if b.is_checkmate():
         res = 1.0 if (b.turn == chess.BLACK) == agent_white else 0.0
+    elif os.environ.get("LADDER_ADJUDICATE") == "1" and not b.is_game_over():
+        # :Cap-adjudication: (P4) — the 120-ply cap scored every unfinished game 0.5, which
+        # draw-floods strong-vs-strong ladders and compresses the MLE toward the anchors. Instead,
+        # let SF judge the cap position: a decisive eval (> LADDER_ADJ_CP centipawns) is awarded.
+        import chess.engine as _ce
+        adj_cp = int(os.environ.get("LADDER_ADJ_CP", "400"))
+        try:
+            info = sf.analyse(b, _ce.Limit(depth=10))
+            sc = info["score"].white().score(mate_score=100000)   # white-relative cp
+        except Exception:
+            sc = None
+        if sc is None or abs(sc) <= adj_cp:
+            res = 0.5
+        else:
+            white_won = sc > 0
+            res = 1.0 if (white_won == agent_white) else 0.0
     else:
         res = 0.5
     return anchor, res, plies

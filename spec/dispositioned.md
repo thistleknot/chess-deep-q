@@ -202,3 +202,26 @@ KEY INSTRUMENT LESSON: the vs-SF anchor ladder DRAW-FLOODS strong agents (120-pl
 -> 0.5 at upper anchors) and understated this to a false 20g "tie" (A2 1917 vs champ 1878 = +39 ladder,
 but +232 head-to-head). For agents near/above the top anchor, the direct native head-to-head is the
 true ruler, NOT the ladder — and NOT head2head (a d2-beam lens) NOR play_games (handicaps the explorer).
+
+BACKLOG SWEEP P1-P7 (2026-07-22, ≤2 cores, all verdict-first):
+- P1 deeper-teacher labels: NO — d5 absorption gave +232 vs the old champion, but d5->d7 collapsed to
+  +47 (band incl 0.5, 30g); diminishing returns, linear eval search-consistent by d7.
+- P2 halfKP nonlinear capacity (nnue_own on d5 labels): NO — lost 0.050 (-512 Elo, band excl 0.5) to
+  the linear champion at matched d4 search; capacity inherits the teacher ceiling, does not extract more.
+- P3 native NNUE Rust port: GATED OUT — won't native-port an eval that loses to the linear.
+  => EVAL AXIS CLOSED: the search-distilled LINEAR amap champion is the endpoint (deeper labels AND
+     more capacity both fail). Strength = search (alpha-beta), not eval class or label depth.
+- P4 absolute Elo (adjudication + SF@2500 anchor): 1840 (1721..1958). Adjudication confirmed the
+  draw-flood was real (champion 0-0-12 decisive vs SF@2500, previously scored 0.5) yet the ABSOLUTE
+  number is consistent with the prior 1878 (overlapping) — proving the vs-SF ladder gives a rough
+  absolute but is BLIND to the +240 head-to-head gain over the prior champion. H2H is the eval-improvement ruler.
+- P5 random-bar/shadow feature audit: amap-897 is highly redundant — only 86/897 features beat the
+  noise null; coverage-map features survive at ~10x the PST rate (53/128 vs 33/769), which is WHY amap
+  beat pst-alone. Diagnostic only (correlation caveat: dropped=redundant, not useless).
+- P6 search-arms MCTS×minimax-λ: NO/parked (prior campaign 0-16 vs native-d9 champion at full budget;
+  native alpha-beta converts wall-clock ~13x better). Champion's alpha-beta is the winning search.
+- P7 Prism: not a strength lever — init/transfer dominated by warm-start (own data); Mod-Wheel
+  regularizer fits only the played-buffer anti-forgetting lane.
+NET: champion (distillA2, search-distilled linear amap, ~1840 absolute / +240 H2H over predecessor)
+stands as the endpoint on every axis tested. Next real levers would need MORE COMPUTE (deeper-than-
+deployment labeling at scale) or a different modality, neither budget-feasible at ≤2 cores tonight.

@@ -15,7 +15,8 @@ def main():
     a = sys.argv[1]; b = sys.argv[2]
     games = int(sys.argv[3]) if len(sys.argv) > 3 else 30
     tag = sys.argv[5] if len(sys.argv) > 5 else "duel"
-    _, line = duel(a, b, games, tag)
+    threads = int(os.environ.get("DUEL_THREADS", "2"))     # respect the operator's ≤2-core cap
+    _, line = duel(a, b, games, tag, threads)
     print(line, flush=True)
 
 
