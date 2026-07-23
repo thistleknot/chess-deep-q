@@ -1,7 +1,8 @@
 # Chess RL from scratch — the Trivium Recipe 🏰
-*A from-scratch RL agent whose champion holds a **1724 Elo floor** (49W-1D-0L over 50 games
-at depth 9 vs Stockfish@1320) — trained on pure self-play with nothing deeper than a
-2-ply glance*
+*A from-scratch RL agent whose champion measures **1878 Elo (95% 1756..2000)** — multi-anchor
+MLE over 50 games at depth 9 vs Stockfish@1500–2300 (the earlier 1724 figure was the Wilson
+floor of a saturated single-anchor scout; consistent, now superseded) — trained on pure
+self-play with nothing deeper than a 2-ply glance*
 
 ## ⭐ The enshrined lesson
 
@@ -17,11 +18,27 @@ maps, the campaign's first confirmed feature win (+51/+72 Elo across two indepen
 The 1320 anchor saturates above ~1700, so the honest claim is a floor, not a point estimate.
 
 ## 🎯 Quick Start
+
+### Lane 1 — just play (pip only, no Rust)
 ```bash
 pip install -r requirements.txt
-python main.py     # play the champion in the terminal
+python main.py     # play the pretrained champion in the terminal
 python app.py      # training console (browser UI at http://127.0.0.1:8000/)
 ```
+That's it — the pretrained CHAMPION plays out of the box on a pure-Python alpha-beta search over
+its distilled weights. No compiler, no toolchain. It's slower than the native engine and the
+dynamic-difficulty dial is native-only, but it plays full-strength moves.
+
+### Lane 2 — native search (optional, faster)
+For full-speed native d9 search (and the difficulty dial), build the Rust extension once. The
+CHAMPION auto-detects it and uses it when present, otherwise transparently falls back to Lane 1.
+```bash
+pip install maturin
+cd rsearch
+maturin develop --release       # requires a Rust toolchain — rustup, https://rustup.rs
+```
+Only the CHAMPION benefits from `rsearch4`; the other agents (net+PUCT, alpha-beta engine, beam,
+nnue) never needed it.
 
 ## 🖼️ In the thick of it
 
@@ -35,6 +52,7 @@ Regenerate anytime: `python experiments/board_still.py <seed>`.
 
 | Doc | What's in it |
 |-----|--------------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Every model's architecture in one format (champion led by the bitter-lesson mechanism; puct/engine/nnue/beam matched) |
 | [`docs/GUIDE.md`](docs/GUIDE.md) | Playing commands, training console & Optuna protocol, architecture, release history, roadmap |
 | [`spec/trivium.spec.md`](spec/trivium.spec.md) | Canonical spec of the recipe |
 | [`docs/LESSONS.md`](docs/LESSONS.md) | Enshrined lessons from the campaign |

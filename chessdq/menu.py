@@ -12,9 +12,9 @@ _PLAY_PLAYOUTS = 160          # :Difficulty-mode: strength dial → :Play-mode: 
 
 def _pick_agent():
     """:Selectable-agent: — CHAMPION default (self-play RL net + native alpha-beta d9,
-    claims 1670); the earlier deliverables stay selectable."""
-    print("\nAgent:  1. CHAMPION — the 1737-scout/1670-claims net, d9 (default; ONE model, "
-          "two sample sizes)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
+    1878 MLE 1756..2000); the earlier deliverables stay selectable."""
+    print("\nAgent:  1. CHAMPION — amap-897 search-distilled net (+232 Elo H2H over the prior "
+          "1878 net), d9 (default)   2. net+PUCT   3. alpha-beta engine   4. beam   5. nnue")
     c = input("Choose (1-5, default 1): ").strip() or "1"
     return {"1": "champion", "2": "puct", "3": "engine", "4": "beam", "5": "nnue"}.get(c, "champion")
 
@@ -120,15 +120,15 @@ def difficulty_mode():
     print("\nChampion difficulty:")
     print("  1. dynamic (default) — tracks YOUR play, targets ~1 sdev above your level")
     print("  2. fixed Elo        — pick a strength and it stays there")
-    print("  3. full strength    — the 1670-claims engine (d9 argmax)")
+    print("  3. full strength    — the 1878-MLE engine (d9 argmax)")
     c = input("Choose (1-3, default 1): ").strip() or "1"
     if c == "2":
         cal = _load_calibrator()
-        tiers = [800, 1000, 1183, 1400, 1572, 1670]
+        tiers = [800, 1000, 1183, 1400, 1572, 1878]
         print("  fixed tiers: " + "  ".join(f"{i+1}.~{e}" for i, e in enumerate(tiers)))
         k = input("Tier (1-6, default 3): ").strip() or "3"
         target = tiers[max(0, min(5, int(k) - 1))] if k.isdigit() else 1183
-        if target >= 1670:
+        if target >= 1878:
             _DIFFICULTY = {"choice": "full", "tau": None, "depth": 9}
         elif target >= 1572:
             _DIFFICULTY = {"choice": "full", "tau": None, "depth": 7}
@@ -164,6 +164,7 @@ def played_buffer_mode():
     self-generated: own d2 search values + outcome, proven trivium blend). Promotion is
     duel-gated, never automatic."""
     import glob as _glob
+    import re as _re
     import subprocess
     import sys as _sys
     n = len(_glob.glob("data/human_games/*.pgn"))
@@ -174,11 +175,34 @@ def played_buffer_mode():
     if (input(f"Fine-tune champion copy on {n} game(s)? (y/n, default y): ").strip().lower() or "y") != "y":
         return
     subprocess.run([_sys.executable, "human_replay.py"], cwd=".")
-    print("Candidate: models/champion_hb.pt — verdict duel (600g vs champion):")
-    print("  python head2head.py kcz:models/champion_hb.pt kcz:models/champion.pt 600 hb_verdict")
-    if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) == "y":
-        subprocess.run([_sys.executable, "head2head.py", "kcz:models/champion_hb.pt",
-                        "kcz:models/champion.pt", "600", "hb_verdict"], cwd=".")
+    # :Games-cap: (operator law) — explore 20, full run 50; head2head's own H2H_CAP
+    # default would clamp a larger number anyway, but the PRINTED command must not
+    # lie about what actually runs. Mover spec matches the champion's live encoder
+    # (enc:amap:, NOT kcz: — that's the retired kc-809 lineage; a dimension
+    # mismatch, not just a stale label).
+    print("Candidate: models/champion_hb.pt — verdict duel (50g vs champion):")
+    print("  python head2head.py enc:amap:models/champion_hb.pt enc:amap:models/champion.pt 50 hb_verdict")
+    if (input("Run the verdict duel now? (y/n, default n): ").strip().lower()) != "y":
+        return
+    result = subprocess.run(
+        [_sys.executable, "head2head.py", "enc:amap:models/champion_hb.pt",
+         "enc:amap:models/champion.pt", "50", "hb_verdict"],
+        cwd=".", capture_output=True, text=True)
+    print(result.stdout)
+    m = _re.search(r"-> Elo [+-]?\d+ \(95% ([+-]?\d+)\.\.([+-]?\d+)\)", result.stdout or "")
+    if not m or float(m.group(1)) <= 0:
+        print("No promotion — band does not exclude zero (or duel failed to report).")
+        return
+    print(f"Candidate clears the champion, band excludes zero ({m.group(1)}..{m.group(2)}).")
+    if (input("Promote to models/champion.pt? backs up the current champion "
+              "first (y/n, default n): ").strip().lower()) != "y":
+        return
+    import shutil as _shutil
+    import time as _time
+    backup = f"models/champion_backup_{_time.strftime('%Y%m%dT%H%M%S')}.pt"
+    _shutil.copy2("models/champion.pt", backup)          # :Backup-before-promote: —
+    _shutil.copy2("models/champion_hb.pt", "models/champion.pt")   # never skip this step
+    print(f"Promoted. Prior champion preserved at {backup}.")
 
 
 def top_menu():

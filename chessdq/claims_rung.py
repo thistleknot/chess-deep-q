@@ -29,6 +29,14 @@ from chessdq.measure_elo import elo_diff, TREND, PLY_CAP
 
 _CTX = {}
 
+# head2head mover-spec prefixes — a rung target with one of these is a Python mover,
+# not a raw ckpt (plain paths, incl. Windows drive paths, never start with them)
+_SPEC_PREFIXES = ("sa:", "beam:", "puct:", "rs:", "enc:", "nnue:", "kcz:")
+
+
+def _is_mover_spec(target):
+    return target.startswith(_SPEC_PREFIXES)
+
 
 def _init_worker(ckpt, depth, cores, counter):
     """Per-process setup: pin ONE core, build the Searcher and a private SF engine."""
@@ -45,10 +53,18 @@ def _init_worker(ckpt, depth, cores, counter):
         p.nice(psutil.BELOW_NORMAL_PRIORITY_CLASS if os.name == "nt" else 5)
     except Exception:
         pass
-    import importlib
-    from chessdq.corpus_gen import raw_weights
-    w, b = raw_weights(ckpt)
-    srch = importlib.import_module("rsearch4").Searcher(w, b)
+    if _is_mover_spec(ckpt):
+        # spec-mover rung (spec/search-arms.spec.md): any head2head mover spec
+        # (sa:/beam:/puct:/rs:/enc:/...) measured by the SAME anchored protocol.
+        import random as _random
+        from chessdq.head2head import mover_from_spec
+        mover = mover_from_spec(ckpt, _random.Random(9000 + idx))
+    else:
+        import importlib
+        from chessdq.corpus_gen import raw_weights
+        w, b = raw_weights(ckpt)
+        srch = importlib.import_module("rsearch4").Searcher(w, b)
+        mover = lambda bd, _s=srch, _d=depth: chess.Move.from_uci(_s.search(bd.fen(), _d)[0])
     sf = None
     sfp = glob.glob("engines/**/stockfish*.exe", recursive=True)
     if sfp:
@@ -56,7 +72,7 @@ def _init_worker(ckpt, depth, cores, counter):
         sf = chess.engine.SimpleEngine.popen_uci(sfp[0])
         sf.configure({"UCI_LimitStrength": True, "UCI_Elo": 1320})
         atexit.register(sf.quit)
-    _CTX = {"srch": srch, "depth": depth, "sf": sf}
+    _CTX = {"mover": mover, "sf": sf}
 
 
 def _one_game(args):
@@ -65,7 +81,7 @@ def _one_game(args):
     g, opp = args
     import random as _random
     import chess.engine
-    srch, depth, sf = _CTX["srch"], _CTX["depth"], _CTX["sf"]
+    mover, sf = _CTX["mover"], _CTX["sf"]
     rng = _random.Random(1000 + g)
     lim = chess.engine.Limit(time=0.05)
     agent_white = (g % 2 == 0)
@@ -73,7 +89,7 @@ def _one_game(args):
     plies = 0
     while not b.is_game_over() and plies < PLY_CAP:
         if (b.turn == chess.WHITE) == agent_white:
-            mv = chess.Move.from_uci(srch.search(b.fen(), depth)[0])
+            mv = mover(b)
         elif opp == "sf":
             mv = sf.play(b, lim).move
         else:
@@ -114,12 +130,17 @@ def main():
     ckpt, depth, games, name = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
     workers = max(1, int(os.environ.get("LADDER_WORKERS", "6")))
     if workers == 1:
-        import importlib
-        from chessdq.corpus_gen import raw_weights
         from chessdq.measure_elo import measure
-        w, b = raw_weights(ckpt)
-        srch = importlib.import_module("rsearch4").Searcher(w, b)
-        mover = lambda bd: chess.Move.from_uci(srch.search(bd.fen(), depth)[0])
+        if _is_mover_spec(ckpt):
+            import random as _random
+            from chessdq.head2head import mover_from_spec
+            mover = mover_from_spec(ckpt, _random.Random(9000))
+        else:
+            import importlib
+            from chessdq.corpus_gen import raw_weights
+            w, b = raw_weights(ckpt)
+            srch = importlib.import_module("rsearch4").Searcher(w, b)
+            mover = lambda bd: chess.Move.from_uci(srch.search(bd.fen(), depth)[0])
         measure(mover, name, games, merge=20)
         return
     cores_env = os.environ.get("LADDER_CORES") or os.environ.get("CHESS_THERMAL_CORES", "")

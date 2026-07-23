@@ -9,6 +9,12 @@ import functools
 import traceback
 from datetime import datetime
 
+# Windows consoles default to a legacy codepage (e.g. cp1252) that can't encode
+# glyphs like '≈' used throughout the UI text; force UTF-8 so those never crash.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # IMPORTANT: Suppress matplotlib debug logging
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
