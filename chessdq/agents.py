@@ -109,6 +109,43 @@ def _puct_value_fn(net, dev):
     return v
 
 
+class PyChampionAgent:
+    """Pure-Python champion (:Lane-1: pip-only playability) — the amap-897 search-distilled eval run
+    inside the Python `AlphaBetaEngine` instead of the native `rsearch4` extension. Same weights and
+    same move source shape as `ChampionAgent` (value / __call__ / root_move), so it drops into
+    :Play-mode: unchanged; it is just slower than native d9 and needs NO Rust toolchain. Building
+    rsearch4 (:Lane-2:) restores full-strength native search."""
+
+    def __init__(self, w, b, engine_time=1.0):
+        import numpy as np
+        from chessdq.encoders import get
+        from chessdq.engine import AlphaBetaEngine
+        self._np = np
+        self._w = np.asarray(w, dtype=np.float64)
+        self._b = float(b)
+        self._enc = get("amap")[0]
+        self._eng = AlphaBetaEngine(eval_fn=self._cp_eval, time_limit=max(engine_time, 1.0))
+
+    def _score(self, board):
+        """White-absolute pre-tanh linear score (matches rsearch4.Searcher.score)."""
+        return float(self._w @ self._enc(board).astype(self._np.float64) + self._b)
+
+    def _cp_eval(self, board):
+        return 800.0 * self._score(board)          # centipawn-ish scale the AlphaBetaEngine expects
+
+    def value(self, board):
+        return math.tanh(self._score(board))       # white-absolute, matches native .value
+
+    def __call__(self, board):
+        return self._eng.search(board)[0]
+
+    def root_move(self, board, tau=0.0):
+        """Full-strength move; the strength-temperature dial is native-only, so the fallback ignores
+        tau (Lane-1 is basic playability — build rsearch4 for the dynamic-difficulty dial)."""
+        mv = self._eng.search(board)[0]
+        return mv, mv
+
+
 def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
     """Return (label, move_fn, value_fn). move_fn(board) -> a legal move (or None); value_fn may be
     None. The default agent is the CHAMPION — the self-play RL net inside native alpha-beta d9,
@@ -125,14 +162,14 @@ def make_agent(name="champion", playouts=160, engine_time=0.3, depth=9):
         from chessdq.corpus_gen import raw_weights
         w, b = raw_weights(path)                     # kc: ZCA identity-gated; amap: raw 897
         try:
-            rsearch4 = importlib.import_module("rsearch4")
-        except ModuleNotFoundError as e:
-            raise ModuleNotFoundError(
-                "rsearch4 (native search extension) is not built. From the repo root, run:\n"
-                "    pip install maturin\n"
-                "    cd rsearch && maturin develop --release\n"
-                "See README.md 'Building the native search extension' for details."
-            ) from e
+            rsearch4 = importlib.import_module("rsearch4")   # :Lane-2: fast native search (needs Rust)
+        except ModuleNotFoundError:
+            # :Lane-1: pip-only playability — pure-Python alpha-beta over the same champion weights.
+            print("rsearch4 native extension not built — using the pure-Python search fallback "
+                  "(slower, no Rust needed). Build rsearch4 for full-strength native d9: see README "
+                  "'Building the native search extension (optional, faster)'.")
+            champ = PyChampionAgent(w, b, engine_time=engine_time)
+            return ("champion(python-fallback, amap-897 search-distilled)", champ, champ.value)
         srch = rsearch4.Searcher(w, b)
         champ = ChampionAgent(srch, depth=depth)
         return (f"champion(d{depth}, amap-897 search-distilled, +232 Elo H2H over the 1878 net)", champ, champ.value)
