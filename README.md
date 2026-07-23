@@ -18,25 +18,27 @@ maps, the campaign's first confirmed feature win (+51/+72 Elo across two indepen
 The 1320 anchor saturates above ~1700, so the honest claim is a floor, not a point estimate.
 
 ## 🎯 Quick Start
+
+### Lane 1 — just play (pip only, no Rust)
 ```bash
 pip install -r requirements.txt
-python main.py     # play the champion in the terminal
+python main.py     # play the pretrained champion in the terminal
 python app.py      # training console (browser UI at http://127.0.0.1:8000/)
 ```
+That's it — the pretrained CHAMPION plays out of the box on a pure-Python alpha-beta search over
+its distilled weights. No compiler, no toolchain. It's slower than the native engine and the
+dynamic-difficulty dial is native-only, but it plays full-strength moves.
 
-### Building the native search extension (rsearch4)
-
-The CHAMPION agent (default in `main.py` → Play) runs its alpha-beta search in a compiled
-Rust extension (`rsearch/`, module name `rsearch4`) — it is **not** installed by
-`pip install -r requirements.txt`. Build it once, from the repo root:
+### Lane 2 — native search (optional, faster)
+For full-speed native d9 search (and the difficulty dial), build the Rust extension once. The
+CHAMPION auto-detects it and uses it when present, otherwise transparently falls back to Lane 1.
 ```bash
 pip install maturin
 cd rsearch
-maturin develop --release
+maturin develop --release       # requires a Rust toolchain — rustup, https://rustup.rs
 ```
-Requires a Rust toolchain (`rustup`, https://rustup.rs). Without this step, Play mode's
-CHAMPION option fails with `ModuleNotFoundError: rsearch4`; the other agents (net+PUCT,
-alpha-beta engine, beam, nnue) don't need it.
+Only the CHAMPION benefits from `rsearch4`; the other agents (net+PUCT, alpha-beta engine, beam,
+nnue) never needed it.
 
 ## 🖼️ In the thick of it
 
