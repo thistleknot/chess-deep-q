@@ -52,6 +52,7 @@ Regenerate anytime: `python experiments/board_still.py <seed>`.
 
 | Doc | What's in it |
 |-----|--------------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Every model's architecture in one format (champion led by the bitter-lesson mechanism; puct/engine/nnue/beam matched) |
 | [`docs/GUIDE.md`](docs/GUIDE.md) | Playing commands, training console & Optuna protocol, architecture, release history, roadmap |
 | [`spec/trivium.spec.md`](spec/trivium.spec.md) | Canonical spec of the recipe |
 | [`docs/LESSONS.md`](docs/LESSONS.md) | Enshrined lessons from the campaign |
