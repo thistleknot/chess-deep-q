@@ -15,6 +15,7 @@ only by composing bake-off SURVIVORS.
 | trivium a/b/c mix | anneal over `TRIV_WARMUP` **+ :Phase-mix: (per-position)** | progress + game phase |
 | γ (discount) | constant (Optuna `decay`) **+ :Dis-gamma: (per-position)** | search↔net disagreement |
 | α (LR) | **:LR-warmup: linear ramp** | timestep only (Adam covers reactivity) |
+| dense_rw (material-shaping coeff) | **:Dense-reward-anneal: epoch-1-scoped decay to 0** | epoch-1 progress only (UNSCREENED) |
 
 ## Signal audit (the five candidates, dispositioned)
 
@@ -57,6 +58,25 @@ only by composing bake-off SURVIVORS.
   quantities DDQN already computes).
 - Cost: one batched no-grad forward per game when ON.
 - Optuna dim `dis_gamma[0.0,0.8]` (`QLEARN_DISG_TUNE=1`).
+
+### :Dense-reward-anneal: — `QLEARN_DENSE_RW_START` / `QLEARN_DENSE_RW_WARMUP` (0 = sparse-only, replicates the default regime)
+- Epoch-1-scoped only: `dense_rw` starts at `QLEARN_DENSE_RW_START` (material-shaping
+  coefficient, material_points normalized by fixed `dense_rw_scale = 39.0`) and anneals
+  linearly to floor 0 over `QLEARN_DENSE_RW_WARMUP` fraction of epoch 1; floor is fixed at
+  0 by construction — the regime must land back on sparse-only reward before epoch 2.
+- Rationale: early self-play from a resumed champion checkpoint may benefit from a brief
+  dense material signal to reduce early-epoch noise in a v3-discriminating regime, without
+  permanently departing from the sparse-reward-only canon.
+- Tuning harness: `experiments/tune_dense_anneal.py` — Optuna TPE over
+  `dense_rw_start[0.0,0.5] | dense_rw_warmup[0.1,0.8]`, resumed from `models/champion.pt`
+  every trial (never mutates the champion checkpoint), objective = KILL-CHECK elo after a
+  bounded 3-epoch budget with patience ≥ max_epochs (trial's own budget completes rather
+  than early-stopping against the historical no-shaping bar). Study storage
+  `models/qlearn_optuna.db`, prior-seeded at `{dense_rw_start: 0.02, dense_rw_warmup: 0.3}`
+  (the value already smoke/control-tested).
+- Status: **UNSCREENED** — organ exists and is tunable per the bakeoff.spec.md 3-trial
+  protocol; no bakeoff verdict has been logged in dispositioned.md yet. Do not treat as a
+  proven dial until a study completes and the ±100 tie rule is applied.
 
 ## Horizon accounting (the reasoning frame — operator-derived, = truncated λ-returns)
 

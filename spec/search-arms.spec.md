@@ -13,7 +13,7 @@ function than the incumbent alpha-beta / d2-beam movers.
 
 | Arm | Mechanism | Prior evidence |
 |---|---|---|
-| `hyb` | :Lambda-tree-backup: + :AB-leaf: | UNTESTED in search placement (see distinction below) |
+| `hyb` | :Lambda-tree-backup: + :AB-leaf: | **CLOSED 2026-07-25.** Native port built + gated + screen-CONFIRMED (`rsearch4.HybSearcher`) — all gates pass, 50g vs reference +275 Elo (band excl 0) at sims-matched budget. Budget-matched vs champion's native d9: LOSES 0-6 (band excl 0.5) — reconfirms the prior Python-tree class-gap finding, now proven NOT a Python-vs-native artifact (the native port still loses at matched wall-clock). PARKED, not promoted; champion's own native d9 stays the production mover. Engine kept for the separate :Lambda-target-training: (sims-matched) lane. |
 | `puc` | plain value-PUCT, champion leaf | PUCT ran only with the weak tower net (parity) — rematch |
 | `ucv` | :UCBV-selection: | UNTESTED (no variance term anywhere in repo search code) |
 

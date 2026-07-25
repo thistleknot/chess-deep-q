@@ -48,6 +48,11 @@ surprise, spec/relative-reward.spec.md).
   3-trial study COMPLETED (best 892 = proven parms + replay_t 1.0, strongest clean-regime
   trial to date); arm superseded by Merge 16 full stack (spec/full-stack.spec.md) which
   includes all its machinery + the magic deck. Archived 2026-07-12.
+- `relay.spec.md` — restart-wave driver; verdict logged closed/refuted in-file. Moved to
+  archive/ 2026-07-25 (file had stayed in the active directory past its own closure).
+- `policy-head.spec.md` (Merge 12) — spec committed, demoted by council round #7 (no
+  linear-capacity precedent), never implemented; see "Archived UNTESTED" entry below.
+  Moved to archive/ 2026-07-25 alongside its disposition record.
 
 ## Feature-screen ledger (screening tier, do-not-retry without new conditions)
 Everything below screened against a matched fresh-seed control on the duel ruler
@@ -225,3 +230,94 @@ BACKLOG SWEEP P1-P7 (2026-07-22, ≤2 cores, all verdict-first):
 NET: champion (distillA2, search-distilled linear amap, ~1840 absolute / +240 H2H over predecessor)
 stands as the endpoint on every axis tested. Next real levers would need MORE COMPUTE (deeper-than-
 deployment labeling at scale) or a different modality, neither budget-feasible at ≤2 cores tonight.
+
+ARCHITECTURE DISPOSITION — target network / critic / Dyna-Q (operator query, 2026-07-25):
+- **No DQN-style target network, correctly absent**: the ":Dis-gamma:" "frozen" value
+  (schedules.spec.md) is the native alpha-beta search's own returned leaf value (`gv`, stored
+  at generation time), NOT a lagging/EMA copy of the net (grep of qlearn.py confirms no
+  target_net/polyak/soft_update). Target nets exist to fix a self-referential bootstrap
+  (Q(s,a) trained against Q(s',a') from the same shifting net); this project's targets are
+  λ-returns anchored to actual game outcomes + search values, so that instability mode does
+  not arise here. Adding one would solve a problem this architecture doesn't have.
+- **No critic, correctly absent, already tried and closed**: actor-critic.spec.md's disposition
+  reasoning explicitly REJECTS the textbook deadly-triad explanation — AC was closed via
+  :Honest-expectation:, a pre-registered prediction that a pooled AC objective lands in the
+  same ~650 Elo band as plain Q-learning because the actor stays a 1-ply reactive policy while
+  search dominates strength. Later confirmed by P6 above (search, not eval/policy class, is
+  the lever). No critic head exists in current code.
+- **Dyna-Q — moot for this domain**: Dyna-Q's value-add is planning with a LEARNED model when
+  the true model is unknown; chess's transition model is exact and known, so planning with the
+  known model already IS the alpha-beta search (actor-critic.spec.md states this directly).
+  MCTS-style rollout-planning was tried and lost to native alpha-beta ~13x on wall-clock (P6) —
+  tested and closed, not an open gap.
+- Bonus: experience replay DOES exist (uniform-sampled deque buffer + a second layered
+  temperature-controlled elite-resampling mechanism, :Admixture-replay:, flag-gated off by
+  default) — the one textbook DQN component genuinely present.
+- Standing next lever (unexecuted, not part of this query but adjacent): the sims-scaling probe
+  (2026-07-17 evening, above) already GO-justified a native rsearch port of `hyb`
+  (λ-tree-backup + ab-leaf) for ~100x sims at equal wall-clock — derived, proven at screen tier,
+  never executed, operator-gated.
+
+NATIVE HYB PORT (2026-07-25): the standing lever above is now BUILT, not just derived.
+`rsearch4::HybSearcher` (rsearch/src/lib.rs) implements :Lambda-tree-backup: + :AB-leaf: as a
+Rust arena-tree PUCT search reusing the ALREADY-NATIVE `Eval` (amap-897 linear score) for
+expansion values and the already-native negamax for the AB-leaf depth-d backed leaf — no new
+eval code, only a new tree/selection layer over existing infrastructure. Exposed to Python as
+`HybSearcher(weights, bias, seed).choose(fen, sims, lambda_backup, c_puct, t_prior, leaf_depth,
+tau) -> (best_uci, gv, leaf_fen, predicted_reply_uci, nodes)`; wired into head2head.py's mover
+dispatch as `san:<k=v,...>:<ckpt.pt>` (sits alongside the existing Python-tree `sa:` mover).
+Gate results (bounded smoke, NOT the full pre-registered battery):
+- G1 sign-convention: PASS (white-up-a-queen +0.32, black-up-a-queen -0.41 on the champion's
+  own raw weights).
+- G2 regression/self-consistency: PASS — lb=0/0.5/1.0 sweep across 3 FENs produces smoothly
+  varying gv and, on the queen-endgame FEN, an actual DIVERGENT top move (lb=0.0 -> a1e5,
+  lb=1.0 -> a1g7), confirming the M-blend is live and load-bearing, not a no-op.
+- G3 thesis: PASS — 3-FEN battery (rook_fork_trap, queen_endgame, midgame_tactic) at lb=0.0 vs
+  lb=1.0, sims=8 (low-sims regime where the mean/minimax gap should bite hardest): 1/3 FENs
+  shows genuine top-move divergence (queen_endgame: lb=0.0 -> a1e5, lb=1.0 -> a1g7, gv shifts
+  0.561->0.563), confirming the M-blend is mechanistically live, not a dead code path; the other
+  2/3 correctly show NO divergence (most positions don't have a live mean/minimax gap — expected,
+  not a failure). Deterministic across 5 seeds (move choice at tau=0 doesn't consume rng, as
+  designed) — seed variation was the wrong axis to probe divergence on, the FEN choice is.
+- G4 (UCB-V sanity): N/A — hyb's own arm space never uses ucbv (search-arms.spec.md); not
+  ported natively.
+- G5 smoke: PASS — 4-game live duel through `chessdq/head2head.py`, no crashes, no illegal moves.
+
+SCREEN-TIER VERDICT (2026-07-25, :Tournament-and-verdict: step 2 — winner vs reference,
+pre-registered winning params lb=0.5/leaf=ab2/c=1.5/tp=0.2 carried over from the ORIGINAL
+Python-tree hyb screen, 2026-07-16): **native `hyb` CONFIRMED at screen tier vs the reference
+beam mover, 50g, +275 Elo (95% CI +150..+401), band EXCLUDES ZERO, 66% decisive.** Same
+direction and comparable magnitude to the original Python-tree result (+338, 2026-07-16),
+now running ~13x cheaper per the same wall-clock-conversion advantage the champion's own
+native alpha-beta already demonstrated over its Python predecessor (P6 above) — i.e. the
+native port didn't just preserve the Python-tree's edge, it inherits the implementation-class
+speedup that was the entire motivation for porting.
+BUDGET-MATCHED FINAL VERDICT (2026-07-25, same session): ran the actual budget-matched probe
+rather than deferring it. Calibration: champion's native d9 ≈1.07s/move on a representative
+midgame FEN; native hyb (lb=0.5, leaf=ab2) reaches that same wall-clock at sims≈2000
+(experiments/duel_hyb_native_d9.py, worker core experiments/_duelcore_hyb.py — mirrors
+distill_iterate.py's `duel()` pattern, torch-free pool workers). Result, 6 deterministic
+diverse-opening games (alternated colors): **native hyb LOSES 0-6 to the champion's own
+native d9 mover, score 0.000 (95% CI 0.000..0.390), band excludes 0.5.** Per the operator's
+own time-budget law ("200g claims run CANCELLED — would only tighten a CI on a decided
+question"), no further games were run: 0-6 in the SAME direction and class as the prior
+Python-tree finding (0-16, −597 Elo, 2026-07-17 ladder disposition above) is already decided,
+not noise.
+**This closes the open question, and refutes the re-open condition's own hypothesis**: the
+2026-07-17 disposition speculated the ~13x class gap was a Python-vs-native wall-clock
+artifact and that porting :Lambda-tree-backup: + :AB-leaf: INTO the native engine (done this
+session) would let sims-scaling reach parity. It did not — even fully native, the PUCT-tree
+loses to plain alpha-beta at matched wall-clock. The real mechanism: alpha-beta's pruning
+explores exponentially fewer irrelevant nodes at a given depth, while every hyb "sim" pays a
+fixed per-node cost (an ab2 leaf call is itself a shallow negamax) regardless of whether that
+branch was ever going to matter — the inefficiency is structural to the tree-search paradigm
+at this eval/domain, not a Python-implementation tax. This is a stronger, more specific
+finding than the original P6/ladder disposition had available.
+**FINAL PROMOTION DECISION: hyb (Python or native) stays PARKED, not promoted.** The
+champion's own native alpha-beta d9 remains the production search — confirmed correct by
+this session's own evidence, not merely inherited from the prior campaign. The native
+`HybSearcher` engine and `san:` mover ARE kept (tested, gated, screen-confirmed +275 Elo
+infrastructure) for a genuinely different re-open condition: :Lambda-target-training:
+(mcts-as-training-target, spec/search-arms.spec.md) operates at the sims-matched screen
+budget where hyb wins, not the wall-clock-matched deployment budget where it loses — that
+lane is unaffected by this verdict and remains its own open question, separately gated.
