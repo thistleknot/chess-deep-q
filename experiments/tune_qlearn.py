@@ -146,6 +146,14 @@ else:
         # sims so arm studies can never resume a beam-target control study
         REGIME += (f"|mcts-lb{float(os.environ['QLEARN_MCTS_LAMBDA']):g}"
                    f"-s{os.environ.get('QLEARN_MCTS_SIMS', '16')}|v1")
+    if float(os.environ.get("QLEARN_MCTS_LAMBDA_START", "0")) > 0:
+        # spec :Lambda-target-anneal: (2026-07-20) — seeded-anneal variant: λ starts ON (guided by
+        # QLEARN_TUNE_SEED, e.g. the champion) and decays to QLEARN_MCTS_LAMBDA within epoch 1. Its
+        # OWN distinct token — must never resume the fixed-λ :Lambda-target-training: study above.
+        REGIME += (f"|mcts-lb-anneal{float(os.environ['QLEARN_MCTS_LAMBDA_START']):g}"
+                   f"-{float(os.environ.get('QLEARN_MCTS_LAMBDA', '0')):g}"
+                   f"-wu{os.environ.get('QLEARN_MCTS_LAMBDA_WARMUP', '0.3')}"
+                   f"-s{os.environ.get('QLEARN_MCTS_SIMS', '16')}|v1")
 ACTOR_ARCH = os.environ.get("QLEARN_ACTOR_ARCH", "linear")     # (ac) actor head arch — study identity
 BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # (q) behavior policy — study identity
 CURRICULUM = os.environ.get("QLEARN_CURRICULUM", "0")          # exploring-starts fraction (passthrough
@@ -220,7 +228,8 @@ def run_trial(p, trial_no):
                       "QLEARN_SURPRISE", "QLEARN_GRPO", "QLEARN_DECK", "QLEARN_DDQN",
                       "QLEARN_DECK_MIX", "QLEARN_DECK_DECAY",
                       "QLEARN_LR_WARMUP", "QLEARN_PHASE_MIX", "QLEARN_DIS_GAMMA",
-                      "QLEARN_CRELU", "QLEARN_MCTS_LAMBDA", "QLEARN_MCTS_SIMS"):
+                      "QLEARN_CRELU", "QLEARN_MCTS_LAMBDA", "QLEARN_MCTS_SIMS",
+                      "QLEARN_MCTS_LAMBDA_START", "QLEARN_MCTS_LAMBDA_WARMUP"):
                 if os.environ.get(k):
                     env[k] = os.environ[k]
             if REPLAY_TUNE:

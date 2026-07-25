@@ -149,6 +149,32 @@ def mover_from_spec(spec, rng):
                   lambda_backup=float(p.get("lb", "0.0")), selection=p.get("sel", "puct"),
                   leaf_fn=leaf_fn, ucb_c=float(p.get("ucbc", "1.0")))
         return lambda board: puct_move(board, vf, enc_fn, sims, rng, **kw)
+    if spec.startswith("san:"):
+        # native hyb mover (spec/search-arms.spec.md :Lambda-tree-backup: + :AB-leaf:,
+        # ported to rsearch4.HybSearcher — same PUCT+minimax-blend tree as 'sa:' but the
+        # WHOLE tree runs in Rust, using the already-native Eval for expansion values and
+        # the already-native negamax for the AB-leaf depth-d backed leaf. sel is always
+        # puct (HybSearcher has no ucbv path — hyb's own arm space never uses it).
+        # 'san:<k=v,...>:<ckpt.pt>' params: lb=<float>, leaf=vf|ab<d>, sims=<int>,
+        # c=<c_puct>, tp=<t_prior>, tau=<float, root dither>.
+        import importlib
+        from chessdq.corpus_gen import raw_weights
+        _, params_s, ckpt = spec.split(":", 2)
+        p = dict(kv.split("=", 1) for kv in params_s.split(",") if kv)
+        w, b = raw_weights(ckpt)
+        leaf = p.get("leaf", "vf")
+        leaf_depth = int(leaf[2:]) if leaf.startswith("ab") else 0
+        seed = int(p.get("seed", "0")) or rng.getrandbits(63)
+        hyb = importlib.import_module("rsearch4").HybSearcher(list(w), b, seed)
+        sims, lb = int(p.get("sims", "400")), float(p.get("lb", "0.0"))
+        c_puct, t_prior = float(p.get("c", "1.5")), float(p.get("tp", "0.2"))
+        tau = float(p.get("tau", "0.0"))
+
+        def _move(board, _hyb=hyb):
+            mv_uci = _hyb.choose(board.fen(), sims, lb, c_puct, t_prior, leaf_depth, tau)[0]
+            return chess.Move.from_uci(mv_uci)
+
+        return _move
     if spec.startswith("beam:"):
         # parameterized default policy (spec/search-arms.spec.md :Beam-mover-spec:):
         # 'beam:<tau>:<width>:<depth>:<inner>' — the incumbent beam mover with its

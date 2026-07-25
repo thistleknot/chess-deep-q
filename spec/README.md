@@ -15,5 +15,18 @@ Operating protocols, still live:
 - [`intervention-queue.spec.md`](intervention-queue.spec.md) — web council / sidecar advisers
 - [`console-pargen.spec.md`](console-pargen.spec.md) — training-console surface contract
 
+Other active specs (current, non-archived):
+- [`bakeoff.spec.md`](bakeoff.spec.md) — feature/organ A/B screening protocol
+- [`h2h-instrument.spec.md`](h2h-instrument.spec.md) — duel-based Elo measurement ruler
+- [`pathfind-population.spec.md`](pathfind-population.spec.md) — zero-seed population search
+- [`repo-layout.spec.md`](repo-layout.spec.md) — package layout (executed)
+- [`schedules.spec.md`](schedules.spec.md) — LR/λ/γ/mix dial panel
+- [`bullet-route.spec.md`](bullet-route.spec.md) — NNUE/bullet corpus pipeline
+- [`search-arms.spec.md`](search-arms.spec.md) — decision-time search screen
+- [`search-distill.spec.md`](search-distill.spec.md) — search-bootstrapped self-distillation /
+  champion promotion (current champion recipe)
+- [`full-stack.spec.md`](full-stack.spec.md) — all-organs-on regime (Merge 16, supersedes
+  the relative-reward → admixture-replay lineage, now archived)
+
 Everything else is dispositioned: [`dispositioned.md`](dispositioned.md) indexes every
-absorbed/superseded/falsified spec, with the files preserved under `archive/`.
+absorbed/superseded/falsified/parked spec, with the files preserved under `archive/`.

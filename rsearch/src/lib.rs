@@ -789,9 +789,254 @@ fn version() -> &'static str {
     "v3.7-amap"
 }
 
+// --- :Hyb-native: (spec/search-arms.spec.md :Lambda-tree-backup: + :AB-leaf:) -------------
+// Native port of chessdq/puct_value.py's puct_move/puct_choose, sel=puct only (hyb's arm
+// space never uses ucbv — see search-arms.spec.md). Reuses the SAME Eval (amap-897 linear,
+// already native) for expansion values and the SAME negamax for :AB-leaf: depth-d backed
+// leaves, so this is a tree/selection layer over infrastructure that already existed.
+//
+// Known v1 simplification vs the Python engine (disposed explicitly, not silent): move
+// choice at tau<=0 is plain visit-argmax, WITHOUT the Python engine's repetition-refusal
+// walk (cozy_chess::Board carries no built-in repetition-history API at this call site).
+// Acceptable for a screen-tier native port; would need a caller-supplied position-hash
+// history to restore bit-for-bit if this graduates past screening.
+struct HNode {
+    board: Board,
+    parent: Option<usize>,
+    mv: Option<Move>,
+    children: Vec<usize>,
+    p: f64,
+    n: u32,
+    w: f64,
+    m: f64,           // minimax subtree value, White-absolute
+    v0: f64,           // immutable expansion-batch value (mirrors Python's V0)
+    expanded: bool,
+    terminal_v: Option<f64>,
+}
+
+fn h_terminal_value(board: &Board) -> f64 {
+    if board.checkers() != BitBoard::EMPTY {
+        return if board.side_to_move() == Color::White { -1.0 } else { 1.0 };
+    }
+    0.0
+}
+
+#[pyclass]
+struct HybSearcher {
+    eval: Eval,
+    tt: Vec<TtEntry>,
+    rng: XorShift,
+}
+
+impl HybSearcher {
+    /// depth-d backed leaf value (:AB-leaf:), White-absolute, using the searcher's OWN
+    /// eval + tt (mirrors Searcher::search's white_val conversion).
+    fn ab_leaf(&mut self, board: &Board, depth: u32) -> f64 {
+        let mut ctx = SearchCtx {
+            eval: &self.eval,
+            nodes: 0,
+            tt: &mut self.tt,
+            killers: [[None; 2]; MAX_PLY],
+            history: vec![0u64; 64 * 64],
+        };
+        let (sc, _, _) = ctx.negamax(board, depth.max(1), 0, f64::NEG_INFINITY, f64::INFINITY);
+        if board.side_to_move() == Color::White { sc } else { -sc }
+    }
+
+    /// Expand `idx`'s children (softmax-over-child-value prior, mover-perspective ranking,
+    /// White-absolute storage — exact port of puct_value._expand). Returns the node's
+    /// backed leaf value (1-ply minimax by default, or the AB-leaf depth-d value).
+    fn expand(&mut self, arena: &mut Vec<HNode>, idx: usize, t_prior: f64, leaf_depth: u32) -> f64 {
+        let board = arena[idx].board.clone();
+        let moves = moves_of(&board);
+        let sgn = if board.side_to_move() == Color::White { 1.0 } else { -1.0 };
+        let mut child_idxs = Vec::with_capacity(moves.len());
+        let mut zs = Vec::with_capacity(moves.len());
+        for mv in &moves {
+            let mut cb = board.clone();
+            cb.play_unchecked(*mv);
+            let terminal_v = if moves_of(&cb).is_empty() { Some(h_terminal_value(&cb)) } else { None };
+            let cv = terminal_v.unwrap_or_else(|| self.eval.score(&cb).tanh());
+            let z = sgn * cv;
+            let cidx = arena.len();
+            arena.push(HNode {
+                board: cb, parent: Some(idx), mv: Some(*mv), children: Vec::new(),
+                p: 0.0, n: 0, w: 0.0, m: cv, v0: cv, expanded: false, terminal_v,
+            });
+            child_idxs.push(cidx);
+            zs.push(z);
+        }
+        let zmax = zs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let mut psum = 0.0;
+        let mut ps = Vec::with_capacity(zs.len());
+        for &z in &zs {
+            let p = ((z - zmax) / t_prior).exp();
+            psum += p;
+            ps.push(p);
+        }
+        for (i, &cidx) in child_idxs.iter().enumerate() {
+            arena[cidx].p = ps[i] / psum;
+        }
+        let mut backed = sgn * zmax;
+        if leaf_depth > 0 {
+            backed = self.ab_leaf(&board, leaf_depth);
+        }
+        arena[idx].children = child_idxs;
+        arena[idx].expanded = true;
+        arena[idx].m = backed;
+        backed
+    }
+
+    fn minimax_children(arena: &[HNode], idx: usize) -> f64 {
+        let white = arena[idx].board.side_to_move() == Color::White;
+        let ms = arena[idx].children.iter().map(|&c| arena[c].m);
+        if white { ms.fold(f64::NEG_INFINITY, f64::max) } else { ms.fold(f64::INFINITY, f64::min) }
+    }
+}
+
+#[pymethods]
+impl HybSearcher {
+    #[new]
+    fn new(weights: Vec<f64>, bias: f64, seed: u64) -> PyResult<Self> {
+        if weights.len() != NFEAT && weights.len() != NAMAP {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "expected {} (kc) or {} (amap) weights, got {}", NFEAT, NAMAP, weights.len())));
+        }
+        Ok(HybSearcher {
+            eval: Eval { w: weights, bias },
+            tt: vec![TtEntry::default(); TT_SIZE],
+            rng: XorShift(seed | 1),
+        })
+    }
+
+    /// (best_uci, gv_white_tanh, leaf_fen, predicted_reply_uci, nodes) — drop-in analog of
+    /// puct_choose for the TDLeaf 4-tuple contract (spec/search-arms.spec.md
+    /// :Lambda-target-training:). leaf_depth=0 -> vf (1-ply backed) leaf; >0 -> :AB-leaf:.
+    #[pyo3(signature = (fen, sims, lambda_backup=0.0, c_puct=1.5, t_prior=0.2, leaf_depth=0, tau=0.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn choose(
+        &mut self, fen: &str, sims: u32, lambda_backup: f64, c_puct: f64, t_prior: f64,
+        leaf_depth: u32, tau: f64,
+    ) -> PyResult<(String, f64, String, String, u64)> {
+        let board: Board = fen
+            .parse()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("bad fen: {e:?}")))?;
+        if moves_of(&board).is_empty() {
+            return Err(pyo3::exceptions::PyValueError::new_err("choose on terminal position"));
+        }
+        let lb = lambda_backup;
+        let mut arena: Vec<HNode> = vec![HNode {
+            board: board.clone(), parent: None, mv: None, children: Vec::new(),
+            p: 0.0, n: 1, w: 0.0, m: 0.0, v0: 0.0, expanded: false, terminal_v: None,
+        }];
+        let backed = self.expand(&mut arena, 0, t_prior, leaf_depth);
+        arena[0].w = backed;
+        let mut nodes: u64 = 1;
+
+        for _ in 0..sims {
+            // SELECT
+            let mut idx = 0usize;
+            while arena[idx].expanded && arena[idx].terminal_v.is_none() {
+                let sgn = if arena[idx].board.side_to_move() == Color::White { 1.0 } else { -1.0 };
+                let sqrt_n = (arena[idx].n as f64).sqrt();
+                let mut best = arena[idx].children[0];
+                let mut best_s = f64::NEG_INFINITY;
+                for &cidx in &arena[idx].children {
+                    let kid = &arena[cidx];
+                    let q = if kid.n == 0 { 0.0 } else { kid.w / kid.n as f64 };
+                    let q_eff = if lb == 0.0 { q } else { (1.0 - lb) * q + lb * kid.m };
+                    let u = c_puct * kid.p * sqrt_n / (1.0 + kid.n as f64);
+                    let s = sgn * q_eff + u;
+                    if s > best_s { best = cidx; best_s = s; }
+                }
+                idx = best;
+            }
+            // EVALUATE
+            nodes += 1;
+            let v = match arena[idx].terminal_v {
+                Some(tv) => tv,
+                None => self.expand(&mut arena, idx, t_prior, leaf_depth),
+            };
+            // BACKUP (leaf keeps its own M until its own children get visited)
+            let leaf = idx;
+            let mut cur = Some(idx);
+            while let Some(node) = cur {
+                arena[node].n += 1;
+                arena[node].w += v;
+                if lb > 0.0 && arena[node].expanded && node != leaf {
+                    arena[node].m = Self::minimax_children(&arena, node);
+                }
+                cur = arena[node].parent;
+            }
+        }
+
+        // MOVE CHOICE — visit-argmax (tau>0: softmax dither); no repetition-refusal (v1 note above)
+        let root_children = arena[0].children.clone();
+        let chosen_idx = if tau > 0.0 {
+            let sgn = if board.side_to_move() == Color::White { 1.0 } else { -1.0 };
+            let vals: Vec<f64> = root_children.iter().map(|&c| {
+                let kid = &arena[c];
+                let mean = (kid.w + kid.v0) / (kid.n as f64 + 1.0);
+                sgn * ((1.0 - lb) * mean + lb * kid.m)
+            }).collect();
+            let mx = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let ws: Vec<f64> = vals.iter().map(|v| ((v - mx) / tau).exp()).collect();
+            let total: f64 = ws.iter().sum();
+            let r = self.rng.unit() * total;
+            let mut acc = 0.0;
+            let mut pick = root_children.len() - 1;
+            for (i, w) in ws.iter().enumerate() {
+                acc += w;
+                if r <= acc { pick = i; break; }
+            }
+            root_children[pick]
+        } else {
+            *root_children.iter().max_by_key(|&&c| arena[c].n).unwrap()
+        };
+
+        // gv: lambda-blend of root mean and EXPANDED-children minimax (:Backed-bootstrap:)
+        let backed_ms: Vec<f64> = root_children.iter()
+            .filter(|&&c| arena[c].expanded || arena[c].terminal_v.is_some())
+            .map(|&c| arena[c].m)
+            .collect();
+        let root_q = arena[0].w / arena[0].n as f64;
+        let gv = if backed_ms.is_empty() {
+            root_q
+        } else {
+            let white = board.side_to_move() == Color::White;
+            let mm = if white { backed_ms.iter().cloned().fold(f64::NEG_INFINITY, f64::max) }
+                     else { backed_ms.iter().cloned().fold(f64::INFINITY, f64::min) };
+            (1.0 - lb) * root_q + lb * mm
+        };
+
+        // PV leaf: descend the chosen child by max visits while real tree exists
+        let mut pv = chosen_idx;
+        loop {
+            if !arena[pv].expanded || arena[pv].children.is_empty() { break; }
+            let best_child = *arena[pv].children.iter().max_by_key(|&&c| arena[c].n).unwrap();
+            if arena[best_child].n == 0 { break; }
+            pv = best_child;
+        }
+        let pred = if arena[chosen_idx].expanded && !arena[chosen_idx].children.is_empty() {
+            let best_reply = *arena[chosen_idx].children.iter().max_by_key(|&&c| arena[c].n).unwrap();
+            if arena[best_reply].n > 0 { uci(&arena[chosen_idx].board, arena[best_reply].mv.unwrap()) }
+            else { String::new() }
+        } else { String::new() };
+
+        Ok((
+            uci(&board, arena[chosen_idx].mv.unwrap()),
+            gv.clamp(-1.0, 1.0),
+            format!("{}", arena[pv].board),
+            pred,
+            nodes,
+        ))
+    }
+}
+
 #[pymodule]
 fn rsearch4(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Searcher>()?;
+    m.add_class::<HybSearcher>()?;
     m.add_function(wrap_pyfunction!(play_games, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     Ok(())

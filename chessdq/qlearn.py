@@ -89,9 +89,30 @@ BEHAVIOR   = os.environ.get("QLEARN_BEHAVIOR", "softmax")      # softmax = 1-ply
 # λ-return TARGETS stay 1-ply greedy (unchanged semantics).
 SEARCH_W   = int(os.environ.get("QLEARN_SEARCH_WIDTH", "8"))   # top-K root moves get reply expansion
 SEARCH_D   = int(os.environ.get("QLEARN_SEARCH_DEPTH", "2"))   # search depth for behavior/measure (2|3)
-MCTS_LB    = float(os.environ.get("QLEARN_MCTS_LAMBDA", "0"))  # spec :Lambda-target-training: — >0 swaps
+MCTS_LB    = float(os.environ.get("QLEARN_MCTS_LAMBDA", "0"))  # spec :Lambda-target-training: — anneal
+# FLOOR (0 = fully off by the end of the anneal window; unchanged semantics if _START is unset).
+MCTS_LB_START = float(os.environ.get("QLEARN_MCTS_LAMBDA_START", os.environ.get("QLEARN_MCTS_LAMBDA", "0")))
+# :Lambda-target-anneal: (2026-07-20, seeded-anneal variant) — starts at MCTS_LB_START (mechanism
+# ON, guided by the seed checkpoint), decays toward MCTS_LB via the shared anneal() shape, e-folding
+# fraction MCTS_LB_WARMUP measured over EPOCH 1 ONLY (not cum_games — a seed ckpt's huge cum_games
+# would otherwise collapse the schedule to its floor on step 1). MCTS_LB_START==MCTS_LB (both set to
+# the same fixed value, the default) reproduces the old fixed-λ behavior exactly — regression-safe.
+MCTS_LB_WARMUP = float(os.environ.get("QLEARN_MCTS_LAMBDA_WARMUP", "0.3"))
+MCTS_LB_ACTIVE = MCTS_LB_START > 0.0
 MCTS_SIMS  = int(os.environ.get("QLEARN_MCTS_SIMS", "16"))     # TDLeaf target/behavior source for the
 #                                                                λ-tree engine (puct_value.puct_choose)
+DENSE_RW   = float(os.environ.get("QLEARN_DENSE_RW", "0"))     # :Dense-reward-anneal: — potential-based
+# material shaping coefficient, FLOOR (0 = fully off by the end of the anneal window — reproduces
+# today's sparse checkmate-only reward exactly). Φ(s) = material_points(x)/DENSE_RW_SCALE, added as
+# γ·Φ(s_{k+1})−Φ(s_k) per step (Ng, Harada & Russell 1999 potential-based shaping — policy-invariant
+# at any fixed coefficient, so this is safe to anneal without biasing the optimum it anneals toward).
+DENSE_RW_START = float(os.environ.get("QLEARN_DENSE_RW_START", os.environ.get("QLEARN_DENSE_RW", "0")))
+# starts at DENSE_RW_START (dense material reward ON, guiding the seed checkpoint's policy), decays
+# toward DENSE_RW via the shared anneal() shape over EPOCH 1 ONLY (mirrors :Lambda-target-anneal:).
+# DENSE_RW_START==DENSE_RW (both the default 0) reproduces current behavior exactly — regression-safe.
+DENSE_RW_WARMUP = float(os.environ.get("QLEARN_DENSE_RW_WARMUP", "0.3"))
+DENSE_RW_SCALE = float(os.environ.get("QLEARN_DENSE_RW_SCALE", "39"))   # max one-side material (pawns)
+DENSE_RW_ACTIVE = DENSE_RW_START > 0.0
 ENC        = os.environ.get("QLEARN_ENC", "pst")               # pst = raw 769 planes | kc = Merge 6
 # KnightCap-donor features (809) | nk = :Features-5k: -> :Kanerva: (kanerva_enc.py, 512-dim
 # overlap counts; pair with QLEARN_ZCA=models/kanerva_zca.npz). Changes the input manifold
@@ -136,7 +157,7 @@ PARGEN_SOFTMAX = int(os.environ.get("QLEARN_PARGEN_SOFTMAX", "0"))  # Merge 11 :
 # with the optimistic zero seed. Set eps=0 when on (τ subsumes uniform exploration).
 # Requires rsearch module ≥ v3.6 (play_games tau kwarg).
 SURPRISE = int(os.environ.get("QLEARN_SURPRISE", "0"))  # Merge 14 :Rating-surprise:
-# (spec/relative-reward.spec.md): the trivium's OUTCOME term uses z_rel = 2·(s − E[s|ratings])
+# (spec/archive/relative-reward.spec.md): the trivium's OUTCOME term uses z_rel = 2·(s − E[s|ratings])
 # instead of raw z on GRADED games — a draw vs a stronger rung pays positive surprise, so
 # non-terminating games carry signal. E from Bradley-Terry over declared rung ratings with
 # the SF@1320 anchor pinning the gauge (:Anchor-pinned:); the agent's own rating updates
@@ -323,13 +344,13 @@ class QAgent:
             leaf_enc = ENC_FN(chess.Board(leaf_fen))
             pred = chess.Move.from_uci(pred_u) if pred_u else None
             return chess.Move.from_uci(mv_u), leaf_enc, float(val), pred
-        if TDLEAF and MCTS_LB > 0.0:
-            # :Lambda-target-training: — λ-tree targets/behavior; measurement
-            # (greedy_move) stays on the d2 beam so both arms share one ruler
+        if TDLEAF and MCTS_LB_ACTIVE and getattr(self, "mcts_lb", MCTS_LB_START) > 0.0:
+            # :Lambda-target-training: / :Lambda-target-anneal: — λ-tree targets/behavior;
+            # measurement (greedy_move) stays on the d2 beam so both arms share one ruler
             from chessdq.puct_value import puct_choose
             mv, leaf_board, gv, pred = puct_choose(
                 board, self.value_fn, ENC_FN, MCTS_SIMS, rng,
-                tau=max(tau, 1e-6), lambda_backup=MCTS_LB)
+                tau=max(tau, 1e-6), lambda_backup=getattr(self, "mcts_lb", MCTS_LB_START))
             return mv, ENC_FN(leaf_board), gv, pred
         if TDLEAF:
             return search_move(board, self.value_fn, max(tau, 1e-6), rng, SEARCH_W,
@@ -473,7 +494,8 @@ def play_game(agent, tau, rng, env, opp_move=None, agent_white=True):
 _SCHED_DBG = {"p": None, "gk": None}     # last-game schedule means (:Schedules: debug print)
 
 
-def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=None, vnet=None):
+def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=None, vnet=None,
+                   dense_rw=0.0):
     """λ-return targets for each visited afterstate. Reward is 0 until the terminal (White-absolute z);
     the bootstrap for step k is the GREEDY value at position k+1 (off-policy max), 0 at the terminal step.
     `lam` is the (possibly variance-adapted) eligibility-trace λ for this epoch.
@@ -487,6 +509,10 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=
         return [], []
     if triv is None:
         triv = _TRIV
+    phi = None
+    if dense_rw:                             # :Dense-reward-anneal: potential Φ(s)=material/scale,
+        phi = [material_points(xs[k]) / DENSE_RW_SCALE for k in range(T)]   # White-absolute, terminal
+        phi.append(0.0)                      # Φ(terminal)=0 by convention (Ng/Harada/Russell 1999)
     zc = z if z_out is None else z_out       # :Rating-surprise:: outcome COMPONENT only —
     # the λ-return's terminal reward stays raw z (game truth); the trivium's c-term anchors
     # on the peer-relative surprise when provided.
@@ -499,6 +525,9 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=
         if gk is None:
             rewards = [0.0] * T
             rewards[-1] = z
+            if phi is not None:
+                for k in range(T):
+                    rewards[k] += dense_rw * (GAMMA * phi[k + 1] - phi[k])
             dones = [False] * T
             dones[-1] = True
             boot = [gvs[k + 1] if k + 1 < T else 0.0 for k in range(T)]
@@ -507,6 +536,8 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=
             G, acc = [0.0] * T, 0.0
             for k in range(T - 1, -1, -1):
                 d = (z - gvs[k]) if k + 1 == T else (gk[k] * gvs[k + 1] - gvs[k])
+                if phi is not None:
+                    d += dense_rw * (gk[k] * phi[k + 1] - phi[k])
                 acc = d + gk[k] * lam * acc
                 G[k] = gvs[k] + acc
         if triv is not None:
@@ -517,6 +548,8 @@ def build_targets(xs, gvs, z, lam, predicted=None, signs=None, triv=None, z_out=
         terminal = (k + 1 == T)
         g_k = gk[k] if gk is not None else GAMMA
         d = (z - gvs[k]) if terminal else (g_k * gvs[k + 1] - gvs[k])
+        if phi is not None:
+            d += dense_rw * (g_k * phi[k + 1] - phi[k])
         ramped = terminal or not predicted[k + 1]
         if ramped and d * signs[k] > 0:                        # favorable surprise -> no credit
             d = 0.0
@@ -646,6 +679,7 @@ def main():
     dev = torch.device(os.environ.get("QLEARN_DEV", "cuda" if torch.cuda.is_available() else "cpu"))
 
     agent = QAgent(dev)
+    agent.mcts_lb = MCTS_LB_START           # :Lambda-target-anneal: init; annealed in the game loop below
     # :Faithful-mode:: plain SGD, one step per game (td.c uses bare TD_ALPHA·dw); otherwise Adam
     opt = (torch.optim.SGD(agent.net.parameters(), lr=ALPHA) if KC_FAITHFUL
            else torch.optim.Adam(agent.net.parameters(), lr=ALPHA))
@@ -669,10 +703,17 @@ def main():
                 print(f"resume shape mismatch ({e}) -> fresh net", flush=True)
                 ck = {}
             if "opt_state" in ck:
-                try:
-                    opt.load_state_dict(ck["opt_state"])
-                except Exception:
-                    pass                   # optimizer format drift -> fresh Adam moments, weights kept
+                saved_groups = ck["opt_state"].get("param_groups", [])
+                saved_is_adam = bool(saved_groups) and "betas" in saved_groups[0]
+                if saved_is_adam == (not KC_FAITHFUL):   # optimizer class must match (SGD<->Adam differ)
+                    try:
+                        opt.load_state_dict(ck["opt_state"])
+                    except Exception:
+                        pass               # optimizer format drift -> fresh moments, weights kept
+                else:
+                    print(f"opt_state is {'adam' if saved_is_adam else 'sgd'}-shaped, "
+                          f"current run is {'adam' if not KC_FAITHFUL else 'sgd'} -> fresh optimizer, weights kept",
+                          flush=True)
             cum_games = int(ck.get("cum_games", 0))
             resume_bar = float(ck.get("strength", -1.0))   # persist the acceptance bar across legs
             agent_elo_r = float(ck.get("rating", 600.0))   # :Rating-surprise: rating rides the ckpt
@@ -718,6 +759,8 @@ def main():
           f"opp={OPP}{f'+reach{OPP_REACH:g}' if OPP_REACH > 0 else ''} "
           f"{'KC-FAITHFUL(ramp,online-sgd) ' if KC_FAITHFUL else ('ramp ' if RAMP else '')}"
           f"{f'RSEARCH-d{RSEARCH_D} ' if RSEARCH_D > 0 else ''}"
+          f"{f'mcts-lb-anneal {MCTS_LB_START:g}->{MCTS_LB:g} wu{MCTS_LB_WARMUP:g}(epoch1) ' if MCTS_LB_ACTIVE else ''}"
+          f"{f'dense-rw-anneal {DENSE_RW_START:g}->{DENSE_RW:g} wu{DENSE_RW_WARMUP:g}(epoch1) ' if DENSE_RW_ACTIVE else ''}"
           f"gen={'frozen/epoch' if FREEZE_EPOCH else 'live'} dev={dev}\n", flush=True)
 
     games_played = 0
@@ -736,6 +779,12 @@ def main():
             agent.sb_tau = anneal(SOFT_BACKUP, 0.0,
                                   (cum_games + games_played) / max(1, cum_games + total_games),
                                   WARMUP)
+        if MCTS_LB_ACTIVE:                                     # :Lambda-target-anneal: — epoch-1-scoped
+            agent.mcts_lb = gen.mcts_lb = MCTS_LB if epoch > 0 else \
+                anneal(MCTS_LB_START, MCTS_LB, ep_games / max(1, epoch_games), MCTS_LB_WARMUP)
+        dense_rw_now = DENSE_RW if epoch > 0 else \
+            anneal(DENSE_RW_START, DENSE_RW, ep_games / max(1, epoch_games), DENSE_RW_WARMUP) \
+            if DENSE_RW_ACTIVE else 0.0                        # :Dense-reward-anneal: — epoch-1-scoped
         if STALE_REHEAT > 0:
             tau *= min(1.0 + STALE_REHEAT * stale, 4.0)        # :Stale-reheat:
         if LR_WARMUP > 0:                                      # :LR-warmup:: linear 5%->100% ramp
@@ -766,6 +815,9 @@ def main():
                     agent.sb_tau = anneal(SOFT_BACKUP, 0.0,
                                           (cum_games + games_played)
                                           / max(1, cum_games + total_games), WARMUP)
+                if MCTS_LB_ACTIVE:                                # :Lambda-target-anneal:
+                    agent.mcts_lb = gen.mcts_lb = MCTS_LB if epoch > 0 else \
+                        anneal(MCTS_LB_START, MCTS_LB, ep_games / max(1, epoch_games), MCTS_LB_WARMUP)
                 if STALE_REHEAT > 0:
                     tau *= min(1.0 + STALE_REHEAT * stale, 4.0)  # :Stale-reheat:
                 if ladder is not None:
@@ -854,7 +906,8 @@ def main():
                     lv = agent.net(torch.from_numpy(np.stack(xs)).to(dev)).cpu().numpy().reshape(-1)
                 boot_gvs = lv.tolist()
                 xt, G = build_targets(xs, boot_gvs, z, lam_eff, pred_f, sgn, None, z_out,
-                                      gvs if DIS_GAMMA > 0 else None)  # dis = |live − frozen|
+                                      gvs if DIS_GAMMA > 0 else None,
+                                      dense_rw=dense_rw_now)  # dis = |live − frozen|
                 if triv_now is not None:
                     zc = z if z_out is None else z_out
                     G = apply_triv(G, gvs, zc, triv_now, xs)
@@ -864,7 +917,8 @@ def main():
                     with torch.no_grad():
                         vnet = agent.net(torch.from_numpy(np.stack(xs)).to(dev)
                                          ).cpu().numpy().reshape(-1).tolist()
-                xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out, vnet)
+                xt, G = build_targets(xs, gvs, z, lam_eff, pred_f, sgn, triv_now, z_out, vnet,
+                                      dense_rw=dense_rw_now)
             for x, g in zip(xt, G):
                 new_pairs.append((x, g))
                 if not KC_FAITHFUL:
@@ -1023,7 +1077,13 @@ def main():
                     ckb = torch.load(best_p, map_location=dev)
                     agent.net.load_state_dict(ckb["state_dict"])
                     if "opt_state" in ckb:
-                        opt.load_state_dict(ckb["opt_state"])
+                        saved_groups = ckb["opt_state"].get("param_groups", [])
+                        saved_is_adam = bool(saved_groups) and "betas" in saved_groups[0]
+                        if saved_is_adam == (not KC_FAITHFUL):   # optimizer class must match
+                            try:
+                                opt.load_state_dict(ckb["opt_state"])
+                            except Exception:
+                                pass          # optimizer format drift -> fresh moments, weights kept
                     if FREEZE_EPOCH:
                         gen.net.load_state_dict(agent.net.state_dict())
                     agent.sync_rsearch()
