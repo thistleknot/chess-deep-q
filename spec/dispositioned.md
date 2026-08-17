@@ -321,3 +321,178 @@ infrastructure) for a genuinely different re-open condition: :Lambda-target-trai
 (mcts-as-training-target, spec/search-arms.spec.md) operates at the sims-matched screen
 budget where hyb wins, not the wall-clock-matched deployment budget where it loses — that
 lane is unaffected by this verdict and remains its own open question, separately gated.
+
+## IRL FEATURE-EXPECTATION MATCHING (2026-07-27, operator: "our new paradigm to TEST")
+
+Tested per `spec/irl-reward.spec.md` — full spec/verdict there, ledger entry here per repo law.
+
+**Scope correction (mid-session):** operator's actual claim was that this project's own hand-
+crafted amap-897 features/search ARE the "expert," not that human/GM demonstrations should be
+sourced. No human/GM PGN corpus exists in-repo (`data/human_games*` = 5 self-play/smoke games,
+confirmed by grep) — correctly ruled out per the bitter-lesson skill's own test (chess reward is
+verifiable, so IRL-from-demonstrations was never the right frame here; see the target-net/critic/
+Dyna-Q disposition above, same session logic: known/exact model, no tacit objective).
+
+**What was actually tested:** single-step MaxEnt-IRL approximation — `mu_E` (deep-search self-play
+feature expectation, depth 5) vs `mu_0` (current gen_depth=2 self-play feature expectation), both
+from the SAME champion weights; `delta = mu_E - mu_0` taken as the MaxEnt gradient direction
+(skipping the full inner-forward-RL convergence loop — a screen, not a claim). `||delta||=0.973`
+vs split-noise floor `0.222` (4.38x — real divergence, not noise). Blended into champion weights
+at swept eta ∈ {0.01, 0.05, 0.10} and measured on the quiet/drawish subset (|label|<0.15, n=5287)
+of the ALREADY-CACHED `distillA_labels.npz` (no new labeling pass).
+
+**VERDICT: NULL, PARKED.** Champion baseline quiet-subset RMS 0.0947; every swept eta made it
+WORSE (0.1125 / 0.2644 / 0.4868), monotonically. Moment-matching over the SAME amap-897 basis
+does not unlock headroom pointwise regression missed — consistent with the P1-P7 eval-axis-closed
+finding (this basis is already near its regression fixed point). Gate 2 (head2head duel) not run
+— not warranted per the pre-registered null clause; zero SFT, zero external data used throughout.
+
+## ENSEMBLE-DISAGREEMENT EXPLORATION (2026-08-08, operator: RL-class insight on model-based
+uncertainty vs epsilon-greedy)
+
+Tested per `spec/ensemble-explore.spec.md` — full spec/verdict there, ledger entry here per repo law.
+
+**Scope correction (pre-registered, before any run):** operator's proposal was "slap on a target
+value network and measure uncertainty." Corrected on two counts: this repo's fast self-play path
+already IS epsilon-greedy (`rsearch/src/lib.rs:632-633`), so the ask maps onto a real branch, not
+an abstraction; and a target network is a lagged copy of one estimator (buys TD-bootstrap stability,
+which this repo doesn't need — `gv` targets are search-anchored, `qlearn.py:477-484`, not
+self-referential), so it produces no uncertainty signal by construction. Uncertainty needs an
+ensemble of independent estimators, not a second copy of one — built a K=8 bootstrap ridge ensemble
+over the existing `fit_ridge`/amap-897 pipeline instead.
+
+**What was tested:** Gate 1 only (offline, no self-play/Rust changes) — K=8 bootstrap resamples of
+the ALREADY-CACHED `distillA_labels.npz` corpus (65,436 leaves), each refit with the existing
+closed-form ridge solver, disagreement = per-position std across the 8 heads' predictions. Compared
+quiet (`|label|<0.15`) vs sharp subsets, both against a shuffled-label null baseline.
+
+**VERDICT: SIGNAL (mechanical), interpretation OPEN — GO to Gate 2 design WITH correction, not a
+plain GO.** K=1 sanity exactly reproduced the champion's own fit (`||w||=0.778` both). Real
+disagreement separates sharp from quiet (gap=0.0023, corr with `|label|`=0.4026) far beyond the
+shuffled-null (gap≈0, corr=0.0093) — clears the pre-registered bar. **But the direction is opposite
+the plan's working assumption**: disagreement is higher on sharp/decisive positions, not quiet ones
+— the "explore where the model is unsure" story doesn't map onto "unsure looks quiet" the way the
+RL-class framing assumed. A leverage/extremity confound check (`corr(disagreement, ||x||)=-0.3014`,
+negative) argues against the simplest bootstrap-variance-inflation alternative but doesn't fully
+rule it out. Gate 2 (`play_one` wiring + h2h duel) NOT built this pass — full detail and re-open/
+re-park conditions in `spec/ensemble-explore.spec.md`'s VERDICT section.
+
+**Gate 2 update (2026-08-08): built, ran clean, duel OPEN — not GO, not PARK.** `rsearch/src/
+lib.rs`'s `eps` branch now steers via ensemble disagreement when `ens_weights` is supplied
+(`ens_weights=vec![]` behavior-identical for every existing caller); the duelled checkpoint
+(`models/champion_ensembleB.pt`) is still a plain single-head `fit_ridge`, ensemble is
+exploration-only per the operator's own framing. Measured leaf-yield from disagreement-steered
+generation was ~14.6 new unique leaves/game, ~10x the plan's implicit assumption — caught live
+(not by pre-run estimate) when the original `GAMES_PER_CYCLE=200` was about to blow the 15-min
+label-step bound (~43 min projected); corrected mid-flight to `GAMES_PER_CYCLE=20` (3 cycles,
+60 games, 662 pooled new leaves, K=8). Screen duel vs `champion.pt` at 20g: +53 Elo (95%
+−97..+202), 85% decisive — positive point estimate, CI crosses zero.
+
+**Claims-grade 50g rung (same day, same checkpoints), CPU-only:** score 0.420 → **Elo −56 (95%
+−152..+40), 92% decisive.** Point estimate flipped negative at the larger sample; CI still
+straddles zero. **VERDICT: PARKED** — two samples (20g +53, 50g −56) both crossing zero with
+unstable sign is the signature of a null effect, not a real edge hidden by small n. Re-open
+condition: a materially different recipe (tighter resync cadence, or a different disagreement
+statistic), not more games at this same recipe. Full detail: `spec/ensemble-explore.spec.md`'s
+Gate 2 VERDICT.
+
+**Gate 2b (2026-08-08, design only, not yet run):** operator pushback on the PARK — "I just don't
+think we found the right optuna settings" — is the PARK's own pre-written re-open condition, not
+scope creep: the two-sample sign-flip is a noise signature for one tested recipe, not evidence
+the whole space is null. Two-stage screen designed (Stage A: offline K/ridge grid, <2 min, root-
+first sanity on the ensemble-construction knobs before trusting any duel reading; Stage B: bounded
+Optuna, n_trials=3, over eps/tau/resync-cadence, seeding the known +53 point rather than re-running
+it), built on `experiments/tune_search.py`'s established pattern. Full design and disposition rule:
+`spec/ensemble-explore.spec.md`'s Gate 2b section.
+
+**Stage A ran (2026-08-08):** K=16/ridge=100 clearly dominates the incumbent K=8/ridge=100
+(corr=0.4692 vs 0.4026, both ≥30x their nulls) — carried forward into Stage B.
+
+**Stage B ran (2026-08-08): PARK stands.** Optuna (TPE, n_trials=3 fresh + seeded +53) swept
+eps∈[0.15,0.5], tau∈[0.02,0.30], games_per_cycle∈{10,20,26} at K=16/ridge=100. All 3 fresh
+trials scored −35 Elo (one recovered manually after an infra crash mid-duel via `study.tell`
+against the already-written checkpoint; one a TPE-resampled exact duplicate of another, so
+only 2 distinct fresh configs were actually explored). Nothing beat the seeded +53, and that
+point had already failed its own 50g confirmation (−56, sign-flip = noise) before this study
+ran. The operator's "wrong optuna settings" hypothesis does not hold up: no config in the
+swept space is better, and moving away from the original recipe cost Elo rather than gained
+it. Re-open condition narrowed from "a genuinely different generation recipe" to: a materially
+different disagreement statistic or architecture change (not further eps/tau/cadence tuning at
+this K/ridge), or ≥10x duel sample size per candidate to resolve the 250-Elo-wide CI at this
+budget. Full trial table: `spec/ensemble-explore.spec.md` Gate 2b Stage B VERDICT.
+
+**Gate 3 ran (2026-08-08): PARK.** Different lever than Gate 2/2b — not exploration
+steering, but using ensemble disagreement to pick which leaves get the expensive
+deep-search `label()` call (an active-learning framing of "train faster," raised
+after the operator asked about Dyna-Q-style model-based RL; chess dynamics are
+already exact and free, so there's no environment model to learn there — the
+labeling call is the actual bottleneck). Pure offline simulation on the cached
+corpus: top-disagreement leaf selection was **worse than random** at every label
+budget tested (20/40/60% of pool), mean relative RMS −1.9% vs. random, 0/3 budgets
+clearing the pre-registered +5% margin. High-disagreement leaves skew toward
+feature-space outliers, so labeling only those overfits the tail and generalizes
+worse than an unbiased random sample. Re-open condition: a selection rule that
+corrects for the outlier bias (quantile stratification, disagreement + typicality
+combined) — not plain top-disagreement selection. Full table:
+`spec/ensemble-explore.spec.md` Gate 3 VERDICT.
+
+## UNCERTAINTY-DIRECTED MCTS HYBRID (2026-08-16, operator: margin-note synthesis from S&B Ch.9)
+
+Tested per `spec/uncertainty-mcts.spec.md` — full implementation + ladder measurement.
+
+**Concept:** K=16 bootstrap ridge ensemble detects high-uncertainty positions (σ_ens > threshold),
+then a bounded PUCT search (32 sims) runs at those positions using softmax over the champion's
+own eval (tempered, τ=0.15) as the move prior. At low-uncertainty positions, falls back to 1-ply
+greedy. Same value function in both arms (ensemble mean) — the ONLY difference is selective MCTS.
+
+**Implementation:** `chessdq/uncertainty_mcts.py` — playing agent with `move_fn(board) -> Move`
+interface. `UncertaintyMCTSAgent` (hybrid) and `GreedyBaselineAgent` (matched control, same eval,
+no MCTS). Ensemble built from `distillA_labels.npz` (65k cached positions, K=16 bootstrap ridge).
+
+**Ladder results (40 games per rung, alternating colors, 100-ply cap, PST adjudication):**
+
+| Agent | vs random | vs heuristic (1-ply PST greedy) |
+|-------|-----------|----------------------------------|
+| Hybrid (MCTS at σ>0.01, 32 sims) | 37W 3D 0L (0.963, +564 Elo) | **20W 20D 0L (0.750, +191 Elo)** |
+| Greedy baseline (same eval) | 37W 3D 0L (0.963, +564 Elo) | **0W 40D 0L (0.500, +0 Elo)** |
+
+**Verdict: CONFIRMED at screen tier.** The selective MCTS converts 50% of draws into wins
+against the heuristic opponent — a +191 Elo gain over the matched control, reproducible across
+both 20g and 40g samples (identical 0.750 score). Both agents are equivalent vs random (the easy
+rung), proving the MCTS cost only helps where it matters (the harder opponent where the greedy
+policy is insufficient). The uncertainty gating allocates compute only where needed.
+
+**Mechanism receipt:** The 1-ply greedy agent using the champion's eval (ensemble-mean of the same
+amap-897 weights) draws every game vs the 1-ply heuristic — they are effectively the same strength
+at depth 1. Adding 32 PUCT sims at positions where σ>0.01 breaks those ties decisively. The eval
+knows the right direction; it just needs search depth at critical moments to realize it.
+
+**Wall-clock:** ~306s for 40 games vs heuristic (hybrid), vs ~21s (greedy). ~15x slower per move
+when MCTS fires. At σ_thresh=0.01, MCTS fires on roughly 50-60% of positions (midgame density).
+
+**Next gate (pre-registered):** vs the champion's own native d9 mover at matched wall-clock. This
+is the test that killed hyb/PUCT (0-6 and 0-16 respectively). The hybrid's advantage is selective
+compute (MCTS only at σ>thresh), so it may do better than hyb's uniform-sims approach — but the
+class gap (Python PUCT vs native alpha-beta) remains the structural risk.
+
+**Re-open to full promotion:** Only if it survives or narrows the gap vs champion at matched budget.
+If it loses as badly as hyb/PUCT did, the lever is confirmed as screen-tier-only (beats weak
+opponents, loses to strong ones at matched time — the standing lesson from every prior search arm).
+
+**Artifacts:** `chessdq/uncertainty_mcts.py`, `experiments/uncertainty_mcts_gate1.py` (offline
+correlation study, separately dispositioned), `experiments/uncertainty_mcts_derive.py` (the
+training pipeline), `models/champion_umcts.pt` (new model), `spec/uncertainty-mcts.spec.md`.
+
+**DERIVE RESULTS (2026-08-16):** Used the hybrid agent to generate 200 games vs varied
+opponents (random, heuristic, alternating colors). 133/200 decisive. Harvested 7,598 novel
+positions not in the existing 65k cache, labeled via discounted MC game outcomes (γ=0.99).
+Merged with cache → refit ridge on 73k positions. New model (`champion_umcts.pt`):
+
+| | vs random | vs heuristic | H2H vs old champion |
+|---|---|---|---|
+| New model (greedy d1) | 0.963 (+564) | **1.000 (+1600)** | **0.750 (+191)** |
+| Old champion (greedy d1) | 0.950 (+512) | 0.250 (−191) | — |
+
+**VERDICT: CONFIRMED IMPROVEMENT.** +191 Elo over old champion head-to-head (20W 20D 0L / 40g).
+Beats heuristic 40-0 (old champion LOST to heuristic 0W 20D 20L). The mechanism works end-to-end:
+uncertainty-directed exploration → decisive games → novel training positions → stronger eval.

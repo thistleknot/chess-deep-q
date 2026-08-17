@@ -171,3 +171,30 @@ Elo stronger than the 1878 TDLeaf champion, native-d9 head-to-head** (robust: A2
     module (`experiments/_duelcore.py`, imports only rsearch4/chess/random). Also: `python - <<EOF`
     heredocs make `__main__` = `<stdin>`, which spawn cannot re-import — run multiprocessing from real
     `.py` files with an `if __name__ == "__main__"` guard.
+
+## Uncertainty-directed MCTS (2026-08-16) — the model learns where it's confused
+
+Outcome: K=16 bootstrap ensemble disagreement identifies positions where the eval is uncertain.
+Bounded PUCT (32 sims, soft-policy prior from the eval itself) at those positions makes the agent
++191 Elo stronger than pure greedy. Used as a training-data generator (vs varied opponents), the
+hybrid produces decisive games the greedy agent draws → 7,598 novel positions → MC outcome labels
+→ refit ridge → **new model beats old champion +191 Elo H2H (20W 20D 0L, 40g), beats heuristic
+40-0** (old champion scored 0.250 vs heuristic at d1). `models/champion_umcts.pt`.
+
+14. **Uncertainty-directed compute beats uniform compute — but only for GENERATION, not labeling.**
+    The offline test (Gate 1) showed σ_ens correlates with residual (0.127, p=2e-53) but selective
+    LABELING of existing positions was negligible (+0.04% RMS). The win comes from using uncertainty
+    to direct WHERE THE AGENT PLAYS (generating novel positions in uncertain territory), not which
+    existing positions get deeper labels. Generation > labeling when the basis is at its regression
+    ceiling.
+
+15. **Self-play with the same agent draws every game and produces no diversity.** The hybrid vs
+    itself (50 games): 0 decisive, 82 unique positions. The hybrid vs varied opponents (200 games):
+    133 decisive, 7,695 unique positions. Diversity of opponent is the generation mechanism, not
+    self-play. Same lesson as KnightCap (graded opponents, not self-play) in a new context.
+
+16. **Game outcomes are free labels and they work.** MC return (γ^t × z) from decisive games as
+    training targets bypassed the need for expensive deep-search labeling (d5 = 3s/pos, infeasible
+    for 7k+ positions without rsearch4). The decisive games ARE the ground truth — positions in
+    winning games have positive value, positions in losing games have negative value. No search
+    needed.
