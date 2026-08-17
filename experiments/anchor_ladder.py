@@ -11,9 +11,17 @@ bell-curve weighting. Estimator: maximize sum_i [s_i ln p_i + (1-s_i) ln(1-p_i)]
 with p_i = 1/(1+10^((A_i - R)/400)); draws s=0.5. CI from Fisher information:
 SE = 1/sqrt(sum (ln10/400)^2 p(1-p)); 95% = R +/- 1.96 SE.
 
+STANDARD PROTOCOL (fixed between model derivations for comparability):
+  Anchors: 900, 1200, 1500, 1800, 2100
+  Games:    10,   25,   30,   25,   10  (total 100)
+  Bell-shaped allocation: more games near expected strength (1200-1800 band),
+  fewer at tails. Change ONLY when the champion demonstrably escapes the range.
+
 Usage: python experiments/anchor_ladder.py <mover_spec_or_ckpt> <depth> \
-           <games_per_anchor> <name> [anchors_csv]
-  anchors default 1500,1700,1900,2100,2300 (SF UCI_Elo min 1320).
+           <games_per_anchor> <name> [anchors_csv] [games_per_csv]
+  per_anchor=0 with default anchors -> uses the standard bell-curve allocation.
+  anchors default 900,1200,1500,1800,2100 (SF UCI_Elo min 1320 for bottom anchors;
+    below 1320 SF ignores UCI_Elo — 900 anchor tests whether the agent is rated at all).
 Env: LADDER_WORKERS (default 6), LADDER_CORES — same semantics as claims_rung.
 Output: per-anchor W-D-L lines + MLE rating with 95% CI; JSON row appended to
 data/rl_trend.jsonl (fields anchors/per_anchor alongside the standard keys).
@@ -36,6 +44,24 @@ from chessdq.claims_rung import _is_mover_spec
 
 _CTX = {}
 LN10_400 = math.log(10.0) / 400.0
+
+# ---------------------------------------------------------------------------
+# STANDARD MEASUREMENT PROTOCOL (fixed between model derivations)
+# ---------------------------------------------------------------------------
+# Anchors span from "any chess model should beat this" (900) to "above the champion's
+# measured ceiling" (2100). The allocation is a bell curve: most games in the 1200-1800
+# band where the champion lineage lives (Fisher information peaks at score ≈ 0.5, i.e.
+# near the agent's true rating). Tails confirm bounds, don't estimate.
+#
+# Total: 100 games. Stays FIXED — change anchors/allocation only when the champion
+# demonstrably escapes the current range (all anchors swept or all lost).
+STANDARD_ANCHORS = [900, 1200, 1500, 1800, 2100]
+STANDARD_GAMES_PER = [10, 25, 30, 25, 10]  # sum=100, bell-shaped
+# Usage with standard protocol: omit per_anchor arg (or pass 0), omit anchors_csv:
+#   python experiments/anchor_ladder.py <ckpt> 9 0 <name>
+# Or explicit:
+#   python experiments/anchor_ladder.py <ckpt> 9 0 <name> 900,1200,1500,1800,2100 10,25,30,25,10
+# ---------------------------------------------------------------------------
 
 
 def _init_worker(target, depth, cores, counter):
@@ -151,14 +177,29 @@ def main():
     target, depth, per_anchor, name = (sys.argv[1], int(sys.argv[2]),
                                        int(sys.argv[3]), sys.argv[4])
     anchors = ([int(x) for x in sys.argv[5].split(",")] if len(sys.argv) > 5
-               else [1500, 1700, 1900, 2100, 2300])
+               else STANDARD_ANCHORS)
+    # Per-anchor game counts: either a single number (uniform, legacy compat) or comma-separated.
+    # The STANDARD_GAMES_PER allocation is a bell-curve centered on the expected-strength range
+    # (~1500-1800 for the champion lineage at native d9). More games near expected strength where
+    # Fisher information is highest; fewer at the tails where sweeps contribute little to the MLE.
+    # This allocation MUST stay fixed between model derivations for direct comparability.
+    if len(sys.argv) > 6:
+        games_per = [int(x) for x in sys.argv[6].split(",")]
+        assert len(games_per) == len(anchors), (
+            f"games_per ({len(games_per)}) must match anchors ({len(anchors)})")
+    elif int(per_anchor) == 0 and anchors == STANDARD_ANCHORS:
+        # per_anchor=0 with standard anchors → use the standard bell-curve allocation
+        games_per = STANDARD_GAMES_PER
+    else:
+        games_per = [int(per_anchor)] * len(anchors)
     workers = max(1, int(os.environ.get("LADDER_WORKERS", "6")))
     cores_env = os.environ.get("LADDER_CORES") or os.environ.get("CHESS_THERMAL_CORES", "")
     cores = ([int(c) for c in cores_env.split(",") if c.strip() != ""][:workers]
              if cores_env else [])
-    jobs = [(g, a) for a in anchors for g in range(per_anchor)]
-    print(f"anchor ladder {name}: {per_anchor}g x anchors {anchors}, pool {workers}"
-          + (f" cores {cores}" if cores else ""), flush=True)
+    jobs = [(g, a) for a, gp in zip(anchors, games_per) for g in range(gp)]
+    total_games = sum(games_per)
+    print(f"anchor ladder {name}: anchors {anchors}, games {games_per} (total {total_games}), "
+          f"pool {workers}" + (f" cores {cores}" if cores else ""), flush=True)
     import multiprocessing as mp
     counter = mp.Value("i", 0)
     per = {a: [0, 0, 0] for a in anchors}      # W, D, L
@@ -174,9 +215,9 @@ def main():
             print(f"    game {done}/{len(jobs)}  vs {anchor}: "
                   f"{'W' if res == 1.0 else 'D' if res == 0.5 else 'L'}  {plies}p  "
                   f"{(time.time() - t0) / done:.0f}s/game-eff", flush=True)
-    for a in anchors:
+    for a, gp in zip(anchors, games_per):
         W, D, L = per[a]
-        print(f"  vs SF@{a}: {W}W-{D}D-{L}L  score {(W + 0.5 * D) / per_anchor:.2f}",
+        print(f"  vs SF@{a}: {W}W-{D}D-{L}L  score {(W + 0.5 * D) / gp:.2f}",
               flush=True)
     r, se = mle_rating(results)
     lo_b, hi_b = r - 1.96 * se, r + 1.96 * se
@@ -184,6 +225,7 @@ def main():
           f"from {len(jobs)} games across {len(anchors)} anchors", flush=True)
     row = {"merge": 20, "agent": name, "ts": int(time.time()), "games": len(jobs),
            "anchors": anchors, "per_anchor": {str(a): per[a] for a in anchors},
+           "games_per": {str(a): gp for a, gp in zip(anchors, games_per)},
            "elo": round(r), "elo_lo": round(lo_b), "elo_hi": round(hi_b),
            "pooled_workers": workers, "instrument": "anchor_ladder_mle"}
     os.makedirs(os.path.dirname(TREND) or ".", exist_ok=True)
