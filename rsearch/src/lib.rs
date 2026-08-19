@@ -227,15 +227,6 @@ impl Eval {
         s
     }
 
-    /// side-to-move tanh value (negamax convention)
-    fn stm(&self, board: &Board) -> f64 {
-        let v = self.score(board).tanh();
-        if board.side_to_move() == Color::White {
-            v
-        } else {
-            -v
-        }
-    }
 }
 
 const MATE: f64 = 10.0;
@@ -296,15 +287,30 @@ impl Default for TtEntry {
     }
 }
 
-struct SearchCtx<'a> {
-    eval: &'a Eval,
+trait EvalFn {
+    fn score(&self, board: &Board) -> f64;
+    /// side-to-move perspective tanh value (negamax convention)
+    fn stm(&self, board: &Board) -> f64 {
+        let v = self.score(board).tanh();
+        if board.side_to_move() == Color::White { v } else { -v }
+    }
+}
+
+impl EvalFn for Eval {
+    fn score(&self, board: &Board) -> f64 {
+        self.score(board)
+    }
+}
+
+struct SearchCtx<'a, E: EvalFn> {
+    eval: &'a E,
     nodes: u64,
     tt: &'a mut Vec<TtEntry>,
     killers: [[Option<Move>; 2]; MAX_PLY],
     history: Vec<u64>,                                // from*64+to
 }
 
-impl<'a> SearchCtx<'a> {
+impl<'a, E: EvalFn> SearchCtx<'a, E> {
     fn qsearch(&mut self, board: &Board, mut alpha: f64, beta: f64) -> (f64, Board) {
         self.nodes += 1;
         let moves = moves_of(board);
@@ -602,6 +608,7 @@ fn play_one(
     ply_cap: u32,
     seed: u64,
     agent_white: bool,
+    ens_weights: &[Vec<f64>],
 ) -> (f64, bool, Vec<(String, f64, bool)>) {
     let mut rng = XorShift(seed | 1);
     let mut tt_a = vec![TtEntry::default(); 1 << 16];
@@ -630,7 +637,63 @@ fn play_one(
         let mv;
         if my_turn {
             if eps > 0.0 && rng.unit() < eps {
-                mv = moves[rng.below(moves.len())];         // ε: state-coverage exploration
+                mv = if ens_weights.is_empty() {
+                    moves[rng.below(moves.len())]            // ε: state-coverage exploration
+                } else {
+                    // :Ensemble-disagreement-explore: (Gate 2, spec/ensemble-explore.spec.md)
+                    // — same weighted-draw shape as :Softmax-tau: below, but vals = std of
+                    // per-head afterstate value (disagreement) instead of value itself. Reuses
+                    // `tau` (unambiguous: this arm only runs when eps rolls true, :Softmax-tau:
+                    // only when it doesn't — they never both fire). Each head packs bias as its
+                    // trailing element (w[..n-1]=weights, w[n-1]=bias), matching fit_ridge's own
+                    // coef layout — no separate bias array needed.
+                    let sign = if board.side_to_move() == Color::White { 1.0 } else { -1.0 };
+                    let k = ens_weights.len() as f64;
+                    let vals: Vec<f64> = moves
+                        .iter()
+                        .map(|&m| {
+                            let mut c = board.clone();
+                            c.play_unchecked(m);
+                            let preds: Vec<f64> = ens_weights
+                                .iter()
+                                .map(|head| {
+                                    let (hw, hb) = head.split_at(head.len() - 1);
+                                    let ev = Eval { w: hw.to_vec(), bias: hb[0] };
+                                    sign * ev.score(&c).tanh()
+                                })
+                                .collect();
+                            let mean = preds.iter().sum::<f64>() / k;
+                            (preds.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / k).sqrt()
+                        })
+                        .collect();
+                    if tau > 0.0 {
+                        let mx = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                        let ws: Vec<f64> = vals.iter().map(|v| ((v - mx) / tau).exp()).collect();
+                        let tot: f64 = ws.iter().sum();
+                        let mut r = rng.unit() * tot;
+                        let mut chosen = moves[0];
+                        for (i, wgt) in ws.iter().enumerate() {
+                            r -= wgt;
+                            if r <= 0.0 {
+                                chosen = moves[i];
+                                break;
+                            }
+                        }
+                        chosen
+                    } else {
+                        // tau<=0: deterministic max-disagreement pick (mirrors :Softmax-tau:'s
+                        // own greedy-at-tau<=0 convention rather than dividing by zero).
+                        let mut best_i = 0;
+                        let mut best_v = f64::NEG_INFINITY;
+                        for (i, &v) in vals.iter().enumerate() {
+                            if v > best_v {
+                                best_v = v;
+                                best_i = i;
+                            }
+                        }
+                        moves[best_i]
+                    }
+                };
                 let predicted = pending_pred.is_some() && reply_actual == pending_pred;
                 let _ = predicted;                          // ε-moves record nothing (no search value)
                 pending_pred = None;
@@ -728,7 +791,7 @@ fn play_one(
 /// opp_depth 0 ignores opp_weights (uniform random). Returns [(z, agent_white,
 /// [(leaf_fen, white_value, predicted)])]. seed varies per game; colors alternate.
 #[pyfunction]
-#[pyo3(signature = (weights, bias, opp_weights, opp_bias, opp_depth, n_games, threads, depth, eps, ply_cap, seed, tau=0.0))]
+#[pyo3(signature = (weights, bias, opp_weights, opp_bias, opp_depth, n_games, threads, depth, eps, ply_cap, seed, tau=0.0, ens_weights=vec![]))]
 #[allow(clippy::too_many_arguments)]
 fn play_games(
     py: Python<'_>,
@@ -744,6 +807,7 @@ fn play_games(
     ply_cap: u32,
     seed: u64,
     tau: f64,
+    ens_weights: Vec<Vec<f64>>,
 ) -> PyResult<Vec<(f64, bool, Vec<(String, f64, bool)>)>> {
     for wl in [weights.len(), opp_weights.len()] {
         if wl != NFEAT && wl != NAMAP {
@@ -751,11 +815,20 @@ fn play_games(
                 "weights must be 809-dim (kc) or 897-dim (amap)"));
         }
     }
+    // each ensemble head packs its bias as the trailing element (see :Ensemble-disagreement-
+    // explore: in play_one) — head len must be agent's weight len + 1.
+    for head in &ens_weights {
+        if head.len() != weights.len() + 1 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "each ens_weights head must be len(weights)+1 (weights, then trailing bias)"));
+        }
+    }
     let agent = Eval { w: weights, bias };
     let opp = Eval { w: opp_weights, bias: opp_bias };
     let results = py.allow_threads(|| {
         let agent = &agent;
         let opp = &opp;
+        let ens_weights = &ens_weights;
         let nt = threads.max(1);
         std::thread::scope(|s| {
             let mut handles = Vec::new();
@@ -768,7 +841,7 @@ fn play_games(
                             g,
                             play_one(agent, opp, opp_depth, depth, eps, tau, ply_cap,
                                      seed.wrapping_add(g as u64).wrapping_mul(0x9E3779B97F4A7C15),
-                                     g % 2 == 0),
+                                     g % 2 == 0, ens_weights),
                         ));
                         g += nt;
                     }
@@ -784,9 +857,176 @@ fn play_games(
     Ok(results)
 }
 
+// --- NNUE native eval (spec/nnue-uncertainty.spec.md) ------------------------------------------
+// EmbeddingBag(sum, 2560→128) → clamp(0,1) → Linear(128,32) → ReLU → Linear(32,1) → centipawns.
+// Feature indices: king_bucket(4) * 640 + sq(64) * 10 + piece_type_color(10). Same as nnue_model.py.
+const NNUE_NUM_FEATURES: usize = 4 * 64 * 10;  // 2560
+const NNUE_ACC_DIM: usize = 128;
+const NNUE_HIDDEN: usize = 32;
+
+struct NnueEval {
+    emb: Vec<f64>,     // (NUM_FEATURES * ACC_DIM) flattened row-major
+    h1_w: Vec<f64>,    // (HIDDEN * ACC_DIM)
+    h1_b: Vec<f64>,    // (HIDDEN)
+    out_w: Vec<f64>,   // (HIDDEN)
+    out_b: f64,
+}
+
+impl NnueEval {
+    fn nnue_features(board: &Board) -> Vec<usize> {
+        let wk = board.pieces(Piece::King) & board.colors(Color::White);
+        let ksq = if wk.0 != 0 { wk.0.trailing_zeros() as usize } else { 0 };
+        let kb = (if (ksq >> 3) >= 4 { 1 } else { 0 }) * 2 + (if (ksq & 7) >= 4 { 1 } else { 0 });
+        let base = kb * 640;
+        let mut idx = Vec::with_capacity(32);
+        let occ_w = bb_u64(board.colors(Color::White));
+        let occ_b = bb_u64(board.colors(Color::Black));
+        let pieces_bb = [
+            bb_u64(board.pieces(Piece::Pawn)),
+            bb_u64(board.pieces(Piece::Knight)),
+            bb_u64(board.pieces(Piece::Bishop)),
+            bb_u64(board.pieces(Piece::Rook)),
+            bb_u64(board.pieces(Piece::Queen)),
+        ];
+        for side in 0..2 {
+            let occ = if side == 0 { occ_w } else { occ_b };
+            for pt in 0..5 {
+                let mut m = pieces_bb[pt] & occ;
+                while m != 0 {
+                    let sq = m.trailing_zeros() as usize;
+                    // pc_idx: pt + side*5 (pawn=0..4 white, 5..9 black)
+                    idx.push(base + sq * 10 + pt + side * 5);
+                    m &= m - 1;
+                }
+            }
+        }
+        idx
+    }
+
+    /// Compute accumulator from scratch for a board position
+    fn accumulate(&self, board: &Board) -> [f64; NNUE_ACC_DIM] {
+        let indices = Self::nnue_features(board);
+        let mut acc = [0.0f64; NNUE_ACC_DIM];
+        for &fi in &indices {
+            let off = fi * NNUE_ACC_DIM;
+            for j in 0..NNUE_ACC_DIM {
+                acc[j] += self.emb[off + j];
+            }
+        }
+        acc
+    }
+
+    /// Run the head on a precomputed accumulator → pre-tanh score
+    fn head(&self, acc: &[f64; NNUE_ACC_DIM]) -> f64 {
+        // Clipped ReLU
+        let mut clipped = [0.0f64; NNUE_ACC_DIM];
+        for j in 0..NNUE_ACC_DIM {
+            clipped[j] = acc[j].clamp(0.0, 1.0);
+        }
+        // Hidden: h1_w @ clipped + h1_b, ReLU
+        let mut h = [0.0f64; NNUE_HIDDEN];
+        for i in 0..NNUE_HIDDEN {
+            let mut s = self.h1_b[i];
+            for j in 0..NNUE_ACC_DIM {
+                s += self.h1_w[i * NNUE_ACC_DIM + j] * clipped[j];
+            }
+            h[i] = if s > 0.0 { s } else { 0.0 };
+        }
+        // Output
+        let mut cp = self.out_b;
+        for i in 0..NNUE_HIDDEN {
+            cp += self.out_w[i] * h[i];
+        }
+        cp / 800.0
+    }
+}
+
+impl EvalFn for NnueEval {
+    fn score(&self, board: &Board) -> f64 {
+        let acc = self.accumulate(board);
+        self.head(&acc)
+    }
+}
+
+#[pyclass]
+struct NnueSearcher {
+    eval: NnueEval,
+    tt: Vec<TtEntry>,
+}
+
+#[pymethods]
+impl NnueSearcher {
+    #[new]
+    fn new(emb: Vec<f64>, h1_w: Vec<f64>, h1_b: Vec<f64>, out_w: Vec<f64>, out_b: f64) -> PyResult<Self> {
+        if emb.len() != NNUE_NUM_FEATURES * NNUE_ACC_DIM {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "emb: expected {} got {}", NNUE_NUM_FEATURES * NNUE_ACC_DIM, emb.len())));
+        }
+        if h1_w.len() != NNUE_HIDDEN * NNUE_ACC_DIM {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "h1_w: expected {} got {}", NNUE_HIDDEN * NNUE_ACC_DIM, h1_w.len())));
+        }
+        if h1_b.len() != NNUE_HIDDEN {
+            return Err(pyo3::exceptions::PyValueError::new_err("h1_b size mismatch".to_string()));
+        }
+        if out_w.len() != NNUE_HIDDEN {
+            return Err(pyo3::exceptions::PyValueError::new_err("out_w size mismatch".to_string()));
+        }
+        Ok(NnueSearcher {
+            eval: NnueEval { emb, h1_w, h1_b, out_w, out_b },
+            tt: vec![TtEntry::default(); TT_SIZE],
+        })
+    }
+
+    fn score(&self, fen: &str) -> PyResult<f64> {
+        let board: Board = fen.parse()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("bad fen: {e:?}")))?;
+        Ok(self.eval.score(&board))
+    }
+
+    fn search(&mut self, fen: &str, depth: u32) -> PyResult<(String, f64, String, String, u64)> {
+        let board: Board = fen.parse()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("bad fen: {e:?}")))?;
+        let mut ctx = SearchCtx {
+            eval: &self.eval,
+            nodes: 0,
+            tt: &mut self.tt,
+            killers: [[None; 2]; MAX_PLY],
+            history: vec![0u64; 64 * 64],
+        };
+        let mut result = None;
+        let mut prev = 0.0f64;
+        for d in 1..=depth {
+            let (mut lo, mut hi) = if d >= 3 {
+                (prev - 0.08, prev + 0.08)
+            } else {
+                (f64::NEG_INFINITY, f64::INFINITY)
+            };
+            loop {
+                let r = ctx.negamax(&board, d, 0, lo, hi);
+                if r.0 <= lo && lo.is_finite() { lo = f64::NEG_INFINITY; continue; }
+                if r.0 >= hi && hi.is_finite() { hi = f64::INFINITY; continue; }
+                prev = r.0;
+                result = Some(r);
+                break;
+            }
+        }
+        let (sc, mv, leaf) = result.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("depth 0"))?;
+        let mv = mv.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no legal moves"))?;
+        let mut child = board.clone();
+        child.play_unchecked(mv);
+        let pred = if depth >= 2 {
+            let (_, pm, _) = ctx.negamax(&child, depth - 1, 0, f64::NEG_INFINITY, f64::INFINITY);
+            pm.map(|m| uci(&child, m)).unwrap_or_default()
+        } else { String::new() };
+        let white_val = if board.side_to_move() == Color::White { sc } else { -sc };
+        Ok((uci(&board, mv), white_val.tanh(), format!("{}", leaf), pred, ctx.nodes))
+    }
+}
+
 #[pyfunction]
 fn version() -> &'static str {
-    "v3.7-amap"
+    "v3.8-nnue"
 }
 
 // --- :Hyb-native: (spec/search-arms.spec.md :Lambda-tree-backup: + :AB-leaf:) -------------
@@ -1037,6 +1277,7 @@ impl HybSearcher {
 fn rsearch4(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Searcher>()?;
     m.add_class::<HybSearcher>()?;
+    m.add_class::<NnueSearcher>()?;
     m.add_function(wrap_pyfunction!(play_games, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     Ok(())

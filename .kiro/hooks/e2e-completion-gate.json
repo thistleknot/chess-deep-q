@@ -1,0 +1,14 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "E2E Completion Gate",
+      "trigger": "Stop",
+      "description": "Prevents the agent from stopping mid-task. Forces completion of the full pipeline (generate, train, measure, compare, commit) before declaring done.",
+      "action": {
+        "type": "agent",
+        "prompt": "Before stopping: verify the task is COMPLETE end-to-end. Check: (1) Did the run produce a final measured result? (2) Are there open questions you could answer yourself? (3) Is there a next step you said you'd do but didn't? (4) Did you hit a wall and stop instead of trying the obvious fix? If ANY of these are YES, you are NOT done — continue working. Do not ask the user permission. Do not suggest they run something. Do not say \"want me to...\" — just DO IT. The only valid stop is: final measurement produced, compared to baseline, disposition written, files committed."
+      }
+    }
+  ]
+}

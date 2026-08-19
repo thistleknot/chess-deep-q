@@ -48,14 +48,12 @@ LN10_400 = math.log(10.0) / 400.0
 # ---------------------------------------------------------------------------
 # STANDARD MEASUREMENT PROTOCOL (fixed between model derivations)
 # ---------------------------------------------------------------------------
-# Anchors span from "any chess model should beat this" (900) to "above the champion's
-# measured ceiling" (2100). The allocation is a bell curve: most games in the 1200-1800
-# band where the champion lineage lives (Fisher information peaks at score ≈ 0.5, i.e.
-# near the agent's true rating). Tails confirm bounds, don't estimate.
-#
-# Total: 100 games. Stays FIXED — change anchors/allocation only when the champion
-# demonstrably escapes the current range (all anchors swept or all lost).
-STANDARD_ANCHORS = [900, 1200, 1500, 1800, 2100]
+# Anchors span the range SF UCI_Elo supports (min 1320) up to well above the
+# champion's measured strength. Bell-curve allocation: most games in the
+# 1500-1900 band where the champion lineage lives at native d9.
+# Total: 100 games at full budget. Stays FIXED between model derivations.
+# Change ONLY when the champion demonstrably escapes the current range.
+STANDARD_ANCHORS = [1320, 1500, 1700, 1900, 2100]
 STANDARD_GAMES_PER = [10, 25, 30, 25, 10]  # sum=100, bell-shaped
 # Usage with standard protocol: omit per_anchor arg (or pass 0), omit anchors_csv:
 #   python experiments/anchor_ladder.py <ckpt> 9 0 <name>

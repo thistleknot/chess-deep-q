@@ -496,3 +496,48 @@ Merged with cache → refit ridge on 73k positions. New model (`champion_umcts.p
 **VERDICT: CONFIRMED IMPROVEMENT.** +191 Elo over old champion head-to-head (20W 20D 0L / 40g).
 Beats heuristic 40-0 (old champion LOST to heuristic 0W 20D 20L). The mechanism works end-to-end:
 uncertainty-directed exploration → decisive games → novel training positions → stronger eval.
+
+## NNUE + UNCERTAINTY-DIRECTED TRAINING (2026-08-16)
+
+Tested per `spec/nnue-uncertainty.spec.md`. The bitter-lesson audit identified Method 5
+(linear over fixed features) as the structural cap. This arm replaces the linear eval with
+a nonlinear NNUE (EmbeddingBag→ClippedReLU→MLP head) trained on the uncertainty-enriched
+corpus. Ported to native Rust (`rsearch4::NnueSearcher`, v3.8-nnue).
+
+**Architecture:** king-bucketed HalfKP sparse features (2560) → EmbeddingBag(sum, 128-dim
+accumulator) → clamp(0,1) → Linear(128,32) → ReLU → Linear(32,1) → centipawns. Same
+feature semantics as `chessdq/nnue_model.py:NNUENet`.
+
+**Training:** 75,627 positions (65k cached d5 + 10k uncertainty-steered novel), augmented
+3x (mirror+color-flip), 200 epochs cosine LR, early-stopped at ep 87. Val RMSE 238cp,
+sign accuracy 97%.
+
+**Matched-depth d7 measurement (20g each, standard anchors):**
+
+| Eval | d7 MLE | 95% CI |
+|---|---|---|
+| Linear (champion.pt) | **1821** | 1639..2004 |
+| NNUE (nnue_unc.pt) | **1605** | 1425..1786 |
+
+**VERDICT: PARKED (−216 Elo vs linear at matched depth).** The NNUE eval quality (238cp
+RMSE) is insufficient to compete with the linear (87cp RMSE). Training converged but the
+75k corpus is not enough for the 330k-parameter model to generalize. Data generation
+saturated at ~95k unique positions from d2 self-play (the eval's reachable state space
+ceiling at this generation depth).
+
+**Infrastructure confirmed working:**
+- `rsearch4::NnueSearcher` — native Rust NNUE eval + alpha-beta, 153k nps at d9
+- `experiments/train_nnue_unc.py` — convergent training pipeline with cosine LR
+- `models/nnue_unc.pt` — trained weights (val_rmse 238cp, ep 87)
+- `data/distill_nnue_unc.jsonl` — 75k merged corpus
+
+**Re-open conditions (either):**
+1. A data source that provides 500k+ unique labeled positions (e.g., deeper generation at
+   d4+, varied openings, or acceptance of external labels — project-constraint-gated)
+2. Incremental accumulator in Rust (O(changed) per node → ~7x speedup → d9 feasible at
+   ~900k nps, compensating eval-quality gap with depth)
+3. A better training recipe (distillation from the linear's own predictions as soft targets,
+   or curriculum training starting from the linear's weights as initialization)
+
+**Artifacts:** `rsearch/src/lib.rs` (NnueSearcher, v3.8-nnue), `chessdq/uncertainty_search.py`,
+`experiments/train_nnue_unc.py`, `models/nnue_unc.pt`, `spec/nnue-uncertainty.spec.md`.
